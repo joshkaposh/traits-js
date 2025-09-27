@@ -1,0 +1,29 @@
+{
+  "name": "traits-js",
+  "module": "src/index.ts",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "traits": "src/bin/traits.bin.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config.ts",
+    "./parser": "./src/parser/index.ts"
+  },
+  "trustedDependencies": [
+    "oxc-resolver"
+  ],
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "latest"
+  },
+  "dependencies": {
+    "oxc-parser": "^0.87.0",
+    "oxc-resolver": "^11.7.1",
+    "oxc-walker": "^0.5.1",
+    "picocolors": "^1.1.1"
+  }
+}

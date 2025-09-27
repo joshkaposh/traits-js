@@ -1,0 +1,13 @@
+{
+    "name": "traits-js",
+    "version": "0.1.0",
+    "workspaces": [
+        "packages/**/*"
+    ],
+    "peerDependencies": {
+        "typescript": "latest"
+    },
+    "dependencies": {
+        "picocolors": "^1.1.1"
+    }
+}
