@@ -1,44 +1,38 @@
-import { trait, instance, type Infer } from 'traits-js';
-
-const log = () => console.log('himom');
+import { instance, trait, type Infer } from 'traits-js';
 
 const depends = Symbol('depends');
 
+// type FooDepends = {
+//     [depends]: {
+//         defaultFoo: [typeof log, typeof trait, SomeObject, typeof FromLibrary];
 
-type SomeObject = object;
+//         [instance]: {
+//             defaultInstanceFoo: ['...'];
+//         }
 
-class FromLibrary { }
+//     };
 
-type FooDepends = {
-    [depends]: {
-        defaultFoo: [typeof log, typeof trait, SomeObject, typeof FromLibrary];
+//     CONSTANT: number;
+//     foo(): void;
+//     defaultFoo?(): void;
 
-        [instance]: {
-            defaultInstanceFoo: ['...'];
-        }
+//     [instance]?: {
+//         defaultInstanceFoo?(): void;
+//     };
 
-    };
+// };
 
-    CONSTANT: number;
-    foo(): void;
-    defaultFoo?(): void;
-
-    [instance]?: {
-        defaultInstanceFoo?(): void;
-    };
-
-};
-
-type FooWithoutDepends = {
-    CONSTANT: number;
-    foo(): void;
-    defaultFoo?(): void;
+// type FooWithoutDepends = {
+//     CONSTANT: number;
+//     foo(): void;
+//     defaultFoo?(): void;
 
 
-    [instance]?: {
-        defaultInstanceFoo?(): void;
-    };
-}
+//     [instance]?: {
+//         defaultInstanceFoo?(): void;
+//     };
+// }
+
 export type Foo = Infer<typeof Foo>;
 
 
@@ -50,62 +44,20 @@ export const Foo = trait<{
     foo(): void;
     defaultFoo?(): void;
 
-    [instance]?: {
+    [instance]: {
         defaultInstanceFoo?(): void;
+        reqFoo(): void;
     };
 }>({
     defaultFoo() {
         this.CONSTANT;
         this.defaultFoo();
         this.foo();
-        // SomeClass
+    },
 
+    [instance]: {
+        defaultInstanceFoo() {
+
+        },
     },
 });
-
-
-//* file: bar.ts 
-//* import {Foo} from './foo;
-
-const ImplFoo = Foo({
-    CONSTANT: 0,
-    foo() { }
-});
-
-class Impl2 { };
-class Impl3 { };
-class Impl4 { };
-class Impl5 { };
-
-ImplFoo(Impl2);
-ImplFoo(Impl3);
-ImplFoo(Impl4);
-ImplFoo(Impl5);
-
-
-//! COMPILED OUTPUT
-class Impl1 {
-    static readonly CONSTANT: 0;
-    static foo() { }
-
-    static defaultFoo() {
-        this.CONSTANT;
-        this.defaultFoo();
-        this.foo();
-    }
-
-    defaultInstanceFoo() { }
-};
-
-
-
-
-
-
-
-
-
-
-
-
-// ImplFoo(Impl1);

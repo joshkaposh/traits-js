@@ -1,15 +1,17 @@
-import { trait, instance, type Infer, type Derive } from 'traits-js';
+import { trait, type instance, type Derive } from 'traits-js';
 import { Foo } from '../foo.trait';
 
 export type FooBar = {
     FOOBAR: string;
+
+    foobar(): void;
 };
 
 export const FooBar = trait<FooBar>({});
 
 export type Baz = {
     CONSTANT_BAZ: number;
-    requiredBaz(): void;
+    baz(): void;
     defaultBaz?(): void;
     [instance]: {
         instanceBaz(): void;
@@ -24,7 +26,7 @@ export const Baz = trait<Foo & FooBar & Baz>({
         this.defaultFoo();
         this.foo();
         this.defaultBaz();
-        this.requiredBaz();
+        this.baz();
     },
 });
 
@@ -37,6 +39,6 @@ export const BazDerive = trait<Derive<[Foo, FooBar], Baz>>({
         this.defaultFoo();
         this.foo();
         this.defaultBaz();
-        this.requiredBaz();
+        this.baz();
     },
 });
