@@ -1,11 +1,10 @@
+import { instance } from './modifier';
+
 export type MethodRecord = Record<string, (...args: any[]) => any>;
 export type ConstKey = Uppercase<string>;
 export type ConstType = string | boolean | number | bigint | symbol;
 export type ConstRecord = Readonly<Record<ConstKey, ConstType>>;
 export type ValidClass<A extends any[] = any[], I extends object = object> = new (...args: A) => I;
-
-export type instance = typeof instance;
-export declare const instance: symbol;
 
 export interface TraitRecord extends ConstRecord {
     [instance]?: MethodRecord;
@@ -42,18 +41,21 @@ export type Trait<Tclass, Ttype extends Array<object>> = Merge<Tclass, Ttype>;
  * declare function myFn(impl: Impl<MyTrait>):void
  * ```
  */
-export type Impl<T extends object> = DefaultMethods<T> & ThisType<Normalize<T>>;
+export type Impl<T extends object> = (T extends { [instance]?: infer I extends Partial<MethodRecord> } ? {
+    [instance]: DefaultMethods<I>
+} : {}) & DefaultMethods<T> & ThisType<Normalize<T>>;
 export type Derive<Base extends any[], T extends object> = MergeProps<Base> & T;
 
-export type AddDerives<Tclass, Ttype extends Array<DeriveFn>> = Trait<Tclass, DerivesToTypes<Ttype>>;
+export type AddDerives<Tclass, Ttype extends Array<DeriveFn>> = Trait<Tclass, InferTypes<Ttype>>;
 export type DeriveFn<T extends object = {}> = <const C extends ValidClass>(target: C) => Trait<C, [T]>;
 export type ImplFn<T extends object = {}> = ((implementation: T) => DeriveFn<T>);
-export type DerivesToTypes<Derives extends any[], Converted extends any[] = []> = Derives extends [infer T, ...infer Rest extends any[]] ? DerivesToTypes<Rest, [...Converted, T extends DeriveFn<infer Type> ? Type : T extends TraitRecord ? T : never]> : Converted;
+export type InferTypes<Derives extends any[], Converted extends any[] = []> = Derives extends [infer T, ...infer Rest extends any[]] ? InferTypes<Rest, [...Converted, T extends DeriveFn<infer Type> ? Type : T extends TraitRecord ? T : never]> : Converted;
 
-export type DefaultMethods<T> = Normalize<{
+type Defaults<T> = {
     [P in DefaultKeysOf<T> as T[P] extends ((...args: any[]) => any) | undefined ? P : never]: T[P];
-}>;
+};
 
+type DefaultMethods<T> = Normalize<Defaults<T>>;
 type Normalize<T> = { [K in keyof T]-?: T[K] } & {};
 
 /**
@@ -64,9 +66,20 @@ type Normalize<T> = { [K in keyof T]-?: T[K] } & {};
  * You may override them with a custom implementation
  * with the same __method signature__ as described by the trait.
  */
-export type DefaultKeysOf<T, K extends keyof T = keyof T> = keyof {
+type DefaultKeysOf<T, K extends keyof T = keyof T> = keyof {
     [P in K as Omit<T, P> extends T ? P : never]: T[K];
 };
+
+// type InstanceKeysOf<T> = T extends {[instance]?: infer I extends Partial<MethodRecord>} ? I : never;
+
+// type MyObj = {
+//     s(): void;
+//     [instance]: {
+//         i(): void;
+//     }
+// };
+
+// type Inst = InstanceKeysOf<MyObj>;
 
 /**
  * Extracts the "required keys" (names of required methods or constants defined in `T`) from trait `T`.
@@ -81,12 +94,12 @@ export type PickStatic<T> = T extends TraitRecord ? Omit<T, instance> : never;
 export type PickInstance<T> = T extends { [instance]?: MethodRecord } ? T[instance] : never;
 
 type MergeProps<Ttype extends any[], Props = {}> = Ttype extends [infer Tcurrent, ...infer Trest extends Array<any>] ? MergeProps<Trest, Props & Tcurrent> : Props;
-type Merge<Tclass, Ttype extends any[]> = Tclass extends (new (...args: infer Args) => infer Instance extends object) & infer StaticProperties extends object ? (
-    new (...args: Args) => Instance & Normalize<PickInstance<MergeProps<Ttype>>>
-) & StaticProperties & Normalize<
-    PickStatic<MergeProps<Ttype>>>
-    : never;
 
-// export type RequiredMethods<T extends object> = RequiredPickMethod<T, Exclude<keyof T, OptionalKeysOf<T>>>;
-// export type StaticMethods<T> = RequiredPickMethod<T, Exclude<keyof T, InstanceKeysOf<T>>>;
-// export type InstanceMethods<T> = RequiredPickMethod<T, InstanceKeysOf<T>>;
+type MergeInstance<Instance, Ttypes extends any[]> = Instance & Normalize<PickInstance<MergeProps<Ttypes>>>;
+
+type MergeStatic<Static, Ttypes extends any[]> = Static & Normalize<PickStatic<MergeProps<Ttypes>>>;
+
+type Merge<Tclass, Ttypes extends any[]> = Tclass extends (new (...args: infer Args) => infer Instance extends object) & infer Static extends object ? (
+    new (...args: Args) => MergeInstance<Instance, Ttypes>
+) & MergeStatic<Static, Ttypes>
+    : never;

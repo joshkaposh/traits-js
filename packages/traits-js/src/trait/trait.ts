@@ -1,5 +1,4 @@
-import type { DerivesToTypes, Trait, DeriveFn, ImplFn, Impl, TraitRecord, ValidClass } from "./types";
-
+import type { InferTypes, Trait, DeriveFn, ImplFn, Impl, TraitRecord, ValidClass } from "./types";
 // TODO: add list of advanced usage examples... after I implement them (Traits deriving other Traits, generic Traits)
 /**
  * # Usage
@@ -72,6 +71,6 @@ export function trait<const T extends TraitRecord>(type: Impl<T>): ImplFn<T> {
     }
 };
 
-export function derive<const C extends ValidClass, const Derives extends DeriveFn[]>(target: C, ..._traits: Derives): Trait<C, DerivesToTypes<Derives>> {
-    return target as unknown as Trait<C, DerivesToTypes<Derives>>;
+export function derive<const C extends ValidClass, const Derives extends DeriveFn[]>(target: C, ..._traits: Derives): Trait<C, InferTypes<Derives>> {
+    return target as unknown as Trait<C, InferTypes<Derives>>;
 };
