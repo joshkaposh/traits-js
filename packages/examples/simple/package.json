@@ -1,0 +1,16 @@
+{
+  "name": "simple",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "register": "bunx traits --register ./"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "traits-js": "workspace:*"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

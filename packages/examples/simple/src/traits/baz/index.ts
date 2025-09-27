@@ -1,0 +1,1 @@
+export { Baz } from './baz.trait';
