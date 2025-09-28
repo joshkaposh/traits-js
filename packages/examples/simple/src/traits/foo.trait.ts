@@ -1,4 +1,4 @@
-import { instance, trait, type Infer } from 'traits-js';
+import { include, instance, trait, type Infer } from 'traits-js';
 
 const depends = Symbol('depends');
 
@@ -41,21 +41,27 @@ export type Foo = Infer<typeof Foo>;
 // import { SomeClass } from 'some-library';
 export const Foo = trait<{
     CONSTANT: number;
-    foo(): void;
-    defaultFoo?(): void;
+    reqStaticFoo(): void;
+    defaultstaticFoo?(): void;
 
     [instance]: {
         defaultInstanceFoo?(): void;
-        reqFoo(): void;
+        reqInstanceFoo(): void;
     };
 }>({
-    defaultFoo() {
+    // [include]: {
+    //     defaultstaticFoo: []
+    // },
+    defaultstaticFoo() {
         this.CONSTANT;
-        this.defaultFoo();
-        this.foo();
+        this.defaultstaticFoo();
+        this.reqStaticFoo();
     },
 
     [instance]: {
+        [include]: {
+            defaultInstanceFoo: []
+        },
         defaultInstanceFoo() {
 
         },

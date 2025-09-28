@@ -1,4 +1,4 @@
-import { trait, type instance, type Derive } from 'traits-js';
+import { instance, trait, type Derive } from 'traits-js';
 import { Foo } from '../foo.trait';
 
 export type FooBar = {
@@ -19,26 +19,32 @@ export type Baz = {
 };
 
 export const Baz = trait<Foo & FooBar & Baz>({
-    defaultFoo() { },
+    defaultstaticFoo() { },
     defaultBaz() {
         this.CONSTANT;
         this.CONSTANT_BAZ;
-        this.defaultFoo();
-        this.foo();
+        this.defaultBaz();
+        this.reqStaticFoo();
         this.defaultBaz();
         this.baz();
     },
+    [instance]: {
+        defaultInstanceFoo() { },
+    }
 });
 
 
 export const BazDerive = trait<Derive<[Foo, FooBar], Baz>>({
-    defaultFoo() { },
+    defaultstaticFoo() { },
     defaultBaz() {
         this.CONSTANT;
         this.CONSTANT_BAZ;
-        this.defaultFoo();
-        this.foo();
+        this.defaultstaticFoo();
+        this.reqStaticFoo();
         this.defaultBaz();
         this.baz();
     },
+    [instance]: {
+        defaultInstanceFoo() { },
+    }
 });
