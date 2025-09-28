@@ -1,15 +1,16 @@
 import { join, basename, normalize } from 'node:path';
 import { existsSync } from 'node:fs';
-import type { ExportNamedDeclaration, TSTypeAliasDeclaration, ExportExportNameKind, ImportNameKind, ParseResult, StaticExportEntry, TSIntersectionType, TSSignature, TSTypeLiteral, TSTypeReference } from 'oxc-parser';
+import type { ExportNamedDeclaration, TSTypeAliasDeclaration, ExportExportNameKind, ImportNameKind, ParseResult, StaticExportEntry, TSIntersectionType, TSTypeLiteral, TSTypeReference, StaticExport, ObjectExpression, Span } from 'oxc-parser';
 import { parseSync } from 'oxc-parser';
 import { walk } from 'oxc-walker';
 import { ResolverFactory, type NapiResolveOptions } from 'oxc-resolver';
 import pc from 'picocolors';
 import type { ParsedTraitConfigExport } from '../config';
-import { declarationName, isDeclaredInModule, typeDeclarationSignatures, type TraitDeclaration } from './node';
-import { CONST, DEFAULT, INSTANCE, REQUIRED, STATIC, Flags, FlagsWithDerives, type FlagsInterface, } from './flags';
-import { type TraitDefinitionError, ParseError } from './error';
-import { Bindings } from './bindings';
+import { declarationName, isDeclaredInModule, typeDeclarationSignatures, type TraitDeclaration, type TraitObjectProperty } from './node';
+import { DeriveError, TraitDefinitionError, PARSE_ERR_TYPE } from './error';
+import { CONST, DEFAULT, INSTANCE, REQUIRED, STATIC, Flags, type FlagsInterface, } from './flags';
+import { TraitDefinition } from './definition';
+import { DefaultMethods } from './default-methods';
 
 const timestamp = (label: string, then: number) => `${label}: ${((performance.now() - then) / 1000)}`;
 
@@ -129,56 +130,59 @@ type RegisterErrorMap = {
 
 type FilePath = string;
 
-interface TraitMetadata {
-    name: string;
-    start: number;
-    end: number;
-    members: TSSignature[];
-    derives: Record<string, TSTypeReference>;
-}
 
-class FileRegistry {
+class TraitFile {
+    #result: ParseFileResultResult;
+
+    #types: TraitTypeExports;
+    #vars: TraitExports;
+    #errors: Record<string, TraitDefinitionError[]>;
+    #typeIds: Record<string, number>;
+    #varIds: Record<string, number>;
+
+    #uninitTraits: UninitializedTraits;
+    #traits: Record<string, TraitDefinition>;
+
+    #nextId = 0;
+
     #importTypes: ImportRegistry = {};
     #importVars: ImportRegistry = {};
     #localExportTypes: LocalExportRegistry = {};
     #reExportVars: ReExportRegistry = {};
     #reExportTypes: ReExportRegistry = {};
-    #localExportVars: LocalExportRegistry = {}
+    #localExportVars: LocalExportRegistry = {};
 
-    #result: ParseFileResultResult;
-    #directory: string;
+    #parsedRefs: Record<string, FlagsInterface> = {};
 
     constructor(result: ParseFileResultResult) {
         this.#result = result;
-        this.#directory = result.originalRequest;
-    }
-
-    get name() {
-        return this.#result.name;
-    }
-
-    get directory() {
-        return this.#directory
+        this.#uninitTraits = {};
+        this.#traits = {};
+        this.#types = {};
+        this.#vars = {};
+        this.#typeIds = {};
+        this.#varIds = {};
+        this.#errors = {};
     }
 
     get path() {
         return this.#result.path;
     }
 
-    get code() {
-        return this.#result.originalCode;
+    get directory() {
+        return this.#result.originalRequest;
+    }
+
+    get name() {
+        return this.#result.name;
     }
 
     get result() {
-        return this.#result;
-    }
-
-    get parseResult() {
         return this.#result.result;
     }
 
     async register(resolver: ResolverFactory, stack: Stack, frame: Frame, file: TraitFile, indexFilter: string) {
-        const current = frame.result;
+        const current = frame.file.result;
         const staticImports = current.module.staticImports;
         const staticExports = current.module.staticExports;
 
@@ -200,14 +204,12 @@ class FileRegistry {
 
         const importNames = new Set<string>();
         const exportNames = new Set<string>();
+        const originalRequest = self.directory;
 
-        let index = 0
-
-        const queue = (name: string, start: number, end: number, isType: boolean, imported: boolean) => {
+        let index = 0;
+        const add = (name: string, start: number, end: number, isType: boolean, imported: boolean) => {
             index += 1;
-
             let starts, ends, names;
-
             if (imported) {
                 starts = importStart;
                 ends = importEnd;
@@ -217,38 +219,16 @@ class FileRegistry {
                 ends = exportEnd;
                 names = exportNames;
 
-                file.queue(name, start, end, isType);
+                file.queue(name, isType);
             }
-
             starts[index] = start;
             ends[index] = end;
             names.add(name);
         }
 
-
-        for (let index = 0; index < staticImports.length; index++) {
-            const staticImport = staticImports[index]!;
-            const entries = staticImport.entries;
-            const localToImport = Object.fromEntries(entries.map(e => [e.localName.value, e.importName.name]));
-            for (let j = 0; j < entries.length; j++) {
-                const e = entries[j]!;
-                const r = e.isType ? importTypes : importVars;
-                const local = e.localName;
-                r[local.value] = {
-                    type: e.importName.kind,
-                    localToImport: localToImport,
-                    moduleRequest: staticImport.moduleRequest.value
-                };
-                queue(local.value, local.start, local.end, e.isType, true);
-            }
-        }
-
-
-        for (let i = staticExports.length - 1; i >= 0; i--) {
-            const e = staticExports[i]!;
-            const entries = e.entries;
-            for (let j = 0; j < entries.length; j++) {
-                const entry = entries[j]!;
+        const registerExports = ({ entries, start, end }: StaticExport) => {
+            for (let i = 0; i < entries.length; i++) {
+                const entry = entries[i]!;
                 // if entry has module request, it is not a local export
                 // e.g "export const someVar = someValue"
                 if (entry.moduleRequest) {
@@ -273,24 +253,44 @@ class FileRegistry {
                         } else {
                             exportVars[name] = entry;
                         }
-                        queue(name, e.start, e.end, entry.isType, false);
-
+                        add(name, start, end, entry.isType, false);
                     }
                 }
             }
+        }
+
+        // register any
+        for (let index = 0; index < staticImports.length; index++) {
+            const staticImport = staticImports[index]!;
+            const entries = staticImport.entries;
+            const localToImport = Object.fromEntries(entries.map(e => [e.localName.value, e.importName.name]));
+            for (let j = 0; j < entries.length; j++) {
+                const e = entries[j]!;
+                const r = e.isType ? importTypes : importVars;
+                const local = e.localName;
+                r[local.value] = {
+                    type: e.importName.kind,
+                    localToImport: localToImport,
+                    moduleRequest: staticImport.moduleRequest.value
+                };
+                add(local.value, local.start, local.end, e.isType, true);
+            }
+        }
+
+        for (let i = staticExports.length - 1; i >= 0; i--) {
+            registerExports(staticExports[i]!);
 
 
-            const originalRequest = frame.registry.result.originalRequest;
             for (const path in reExportTypes) {
                 const resolveResult = tryResolveSync(resolver, originalRequest, path);
                 const absolutePath = resolveResult?.path;
                 if (absolutePath && !stack.visited(absolutePath)) {
                     const newParseResult = await resolve(resolver, absolutePath, indexFilter);
                     checkParseResult(newParseResult, absolutePath);
-                    stack.push(new Frame(
-                        newParseResult.path.endsWith(indexFilter),
-                        newParseResult,
-                    ));
+                    stack.push({
+                        isIndex: newParseResult.path.endsWith(indexFilter),
+                        file: new TraitFile(newParseResult)
+                    });
                 }
             }
 
@@ -301,7 +301,7 @@ class FileRegistry {
                 if (absolutePath && !stack.visited(absolutePath)) {
                     const newResult = await resolve(resolver, absolutePath, path);
                     checkParseResult(newResult, absolutePath);
-                    stack.push(new Frame(newResult.name.endsWith(indexFilter), newResult));
+                    stack.push({ isIndex: newResult.name.endsWith(indexFilter), file: new TraitFile(newResult) });
                 }
             }
         }
@@ -309,136 +309,14 @@ class FileRegistry {
         return exportNames;
     }
 
-    importVar(name: string) {
-        return this.#importVars[name];
-    }
 
-    importType(name: string) {
-        return this.#importVars[name];
-    }
-
-    var(name: string) {
-        return this.#localExportVars[name];
-    }
-
-    debug() {
-        const str = 'DEBUG REGISTRY';
-        const len = Math.floor(str.length / 2);
-        console.log(str.padStart(len, '-').padEnd(len, '-'));
-        console.log('local types: ', Object.keys(this.#localExportTypes));
-        console.log('local vars: ', Object.keys(this.#localExportVars));
-    }
-
-    type(name: string) {
-        return this.#localExportTypes[name];
-    }
-
-
-    serialize(): Record<string, any> {
-        return {
-            name: this.name,
-            path: this.path,
-            importTypes: this.#importTypes,
-            importVars: this.#importVars,
-            reExportTypes: this.#reExportTypes,
-            reExportVars: this.#reExportVars,
-            localExportTypes: this.#localExportTypes,
-            localExportVars: this.#localExportTypes,
-        };
-    }
-}
-
-class TraitDefinition {
-    #flags: FlagsInterface;
-    #name: string;
-    #start: number;
-    #end: number;
-
-    constructor(name: string, start: number, end: number, flags: FlagsInterface) {
-        this.#flags = flags;
-        this.#name = name;
-        this.#start = start;
-        this.#end = end;
-    }
-
-    get name() {
-        return this.#name;
-    }
-
-    get start() {
-        return this.#start;
-    }
-
-    get end() {
-        return this.#end;
-    }
-
-    get flags() {
-        return this.#flags;
-    }
-
-}
-
-class TraitFile {
-    #registry: FileRegistry;
-    #uninitMeta: TraitMetadata[];
-    #uninitTraits: UninitializedTraits;
-    #traits: Record<string, TraitDefinition>;
-    #types: TraitTypeExports;
-    #vars: TraitExports;
-    #errors: Record<string, TraitDefinitionError[]>;
-    #typeIds: Record<string, number>;
-    #varIds: Record<string, number>;
-
-    constructor(registry: FileRegistry) {
-        this.#registry = registry;
-        this.#uninitMeta = [];
-        this.#uninitTraits = {};
-        this.#traits = {};
-        this.#types = {};
-        this.#vars = {};
-        this.#typeIds = {};
-        this.#varIds = {};
-        this.#errors = {};
-    }
-
-    get path() {
-        return this.#registry.path;
-    }
-
-    get directory() {
-        return this.#registry.directory;
-    }
-
-    get name() {
-        return this.#registry.name;
-    }
-
-    get registry() {
-        return this.#registry;
-    }
-
-    queue(name: string, start: number, end: number, isType: boolean) {
+    queue(name: string, isType: boolean) {
         if (VERBOSE) {
             print('Queue', `${isType ? 'type ' : ''} ${name}`)
         }
 
-        const id = this.#uninitMeta.length;
-        this.#uninitMeta.push({
-            name: name,
-            start: start,
-            end: end,
-            members: [],
-            derives: {}
-        });
-
-        // const info: BindingInfo =  {
-        //     name: name,
-        //     isType: isType,
-        //     parent: parent,
-        //     node: node,
-        // };
-
+        const id = this.#nextId;
+        this.#nextId += 1;
         const ids = isType ? this.#typeIds : this.#varIds;
         ids[name] = id;
 
@@ -451,15 +329,14 @@ class TraitFile {
     }
 
     initialize(project: Project) {
-        const self = this;
-        const registry = self.#registry,
+        const self = this,
             uninitialized = self.#uninitTraits,
             types = self.#types,
             traits = self.#traits,
             bar = '-'.repeat(32);
 
         if (VERBOSE) {
-            print('Initialize', registry.path);
+            print('Initialize', self.path);
         }
 
         for (const name in uninitialized) {
@@ -468,7 +345,7 @@ class TraitFile {
             const parent = uninit.trait.parent;
             const typeDeclaration = uninit.typeDeclaration;
             const declarator = node.declarations[0];
-            const definition_errors: ParseError[] = [];
+            // const definition_errors: ParseError[] = [];
             const start = parent.start;
             const end = parent.end;
             if (VERBOSE) {
@@ -478,51 +355,120 @@ class TraitFile {
             if (declarator.init.type === 'CallExpression' && declarator.init.callee.name === 'trait') {
                 const call_expr = declarator.init;
                 if (call_expr.arguments.length === 1) {
-                    const parsedFlags = self.#parseTraitType(project, registry, types, call_expr.typeArguments.params[0], typeDeclaration);
-                    if (parsedFlags) {
-                        const joined = FlagsWithDerives.fromDerives(parsedFlags.base, parsedFlags.derives);
-                        let str = `[ ${name} ]:\n`;
-                        str += `    constants: [ ${joined.namesOfType(CONST).join(', ')} ]\n`;
-                        str += `    static: [ ${joined.namesOfType(STATIC).join(', ')} ]\n`;
-                        str += `    instance: [ ${joined.namesOfType(INSTANCE).join(', ')} ]\n`;
-                        str += `    default: [ ${joined.namesOfType(DEFAULT).join(', ')} ]\n`;
-                        str += `    required: [ ${joined.namesOfType(REQUIRED).join(', ')} ]\n`;
-
-                        console.log(str);
+                    const parsedFlags = self.#parseTraitTypeArgument(project, self, declarator.id.name, types, call_expr.typeArguments.params[0], typeDeclaration);
+                    if (!Array.isArray(parsedFlags)) {
+                        const flags = Flags.withDerives(parsedFlags.base, parsedFlags.derives);
 
                         const traitObject = call_expr.arguments[0];
                         const properties = traitObject.properties;
 
-                        let valid = true;
-                        for (let i = 0; i < properties.length; i++) {
-                            const prop = properties[i]!;
-                            const propName = prop.key.name;
-                            // checkProperty(prop as any, {}, errors);
-                            if (prop.value.type === 'FunctionExpression') {
-                                if (!joined.hasName(propName)) {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                            // if (Flags.has(flags.flagsOfName(propName)!, REQUIRED)) {
-                            //     errors.push(ParseError.RequiredMethodHasDefinition(propName));
-                            // } else {
+                        const defaultMethods = new DefaultMethods();
+                        const defaultStatic = flags.staticDefaultNames;
+                        const defaultInstance = flags.instanceDefaultNames;
+                        const requiredStatic = flags.staticRequiredNames;
+                        const requiredInstance = flags.instanceRequiredNames;
 
-                            // }
+                        const unknownStatic: Span[] = [];
+                        const unknownInstance: Array<{
+                            type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
+                            start: number;
+                            end: number
+                        }> = [];
+
+                        const definedStaticRequireds: string[] = [];
+                        const definedInstanceRequireds: string[] = [];
+
+
+                        for (let i = 0; i < properties.length; i++) {
+                            const property = properties[i]!;
+                            const propertyName = property.key.name;
+
+                            if (propertyName === 'instance' && property.value.type === 'ObjectExpression') {
+                                const instanceProperties = property.value.properties;
+                                for (let j = 0; j < instanceProperties.length; j++) {
+                                    const instanceProperty = instanceProperties[j]!;
+                                    if (instanceProperty.type === 'SpreadElement') {
+                                        unknownInstance.push({ type: 'SpreadAssigment', start: instanceProperty.start, end: instanceProperty.end });
+                                    } else {
+                                        const key = instanceProperty.key;
+                                        if (key.type === 'Identifier') {
+                                            if (defaultInstance.has(key.name)) {
+                                                defaultMethods.add(key.name, instanceProperty.start, instanceProperty.end);
+                                                // console.log('INSTANCE KEY: ', defaultInstance.has(key.name));
+                                            } else if (requiredInstance.has(key.name)) {
+                                                definedInstanceRequireds.push(key.name);
+                                            }
+                                        } else {
+                                            unknownInstance.push({
+                                                type: 'KeyNeIdentifier',
+                                                start: instanceProperty.key.start,
+                                                end: instanceProperty.key.end,
+                                            });
+                                        }
+                                    }
+                                }
+
+                            } else if (property.value.type === 'FunctionExpression') {
+                                if (defaultStatic.has(propertyName)) {
+                                    defaultMethods.add(propertyName, property.start, property.end);
+                                } else if (requiredStatic.has(propertyName)) {
+                                    definedStaticRequireds.push(propertyName);
+                                }
+
+                            } else {
+                                unknownStatic.push({
+                                    start: property.key.start,
+                                    end: property.key.end
+                                })
+                            }
                         }
+
                         traits[name] = new TraitDefinition(
                             name,
                             start,
                             end,
-                            joined,
+                            flags,
+                            unknownStatic,
+                            unknownInstance
                         );
 
-                    } else {
-                        //!Invalid: failed to parse type argument for trait call...
+                        if (!unknownStatic.length && !unknownInstance.length) {
+                            let str = `validated(${name})\n`;
+                            str += `    constants: [ ${flags.namesOfType(CONST).join(', ')} ]\n`;
+                            str += `    static: [ ${flags.namesOfType(STATIC).join(', ')} ]\n`;
+                            str += `    instance: [ ${flags.namesOfType(INSTANCE).join(', ')} ]\n`;
+                            str += `    default: [ ${flags.namesOfType(DEFAULT).join(', ')} ]\n`;
+                            str += `    required: [ ${flags.namesOfType(REQUIRED).join(', ')} ]\n`;
+                            console.log(str);
+                        } else {
+                            const staticCount = unknownStatic.length;
+                            const instanceCount = unknownInstance.length;
+                            const errCount = staticCount + instanceCount;
+
+                            if (!VERBOSE) {
+                                console.log(`%s has %s errors (%s static errors, %s instance errors)`, name, errCount, staticCount, instanceCount);
+                            } else {
+                                const code = self.#result.originalCode;
+                                let str = `${name} has (${errCount}) errors...`;
+                                str += `  with ${staticCount} static errors...`;
+                                for (const node of unknownStatic) {
+                                    str += `\n    code: ${code.slice(node.start, node.end)}`;
+                                }
+
+                                str += `  with ${instanceCount} instance errors...`;
+                                for (const node of unknownInstance) {
+                                    str += `\n    type: ${node.type}: ${code.slice(node.start, node.end)}`;
+                                }
+
+                                console.log(str);
+
+
+                            }
+                            // }
+                        }
+
                     }
 
-                } else {
-                    // invalid: trait call length should be 1
                 }
             }
 
@@ -539,105 +485,28 @@ class TraitFile {
         // return index == null ? void 0 : this.#uninitMeta[index];
     }
 
-
-    //! PARSE TRAIT TYPE
-    #parseTraitType(
+    #parseTraitTypeArgument(
         project: Project,
-        registry: FileRegistry,
+        self: TraitFile,
+        name: string,
         typeDecs: TraitTypeExports,
         typeArgument: TSTypeLiteral | TSTypeReference | TSIntersectionType,
         typeDeclaration: TSTypeAliasDeclaration | undefined
-    ) {
 
-        const errors = [];
+    ): { base: FlagsInterface; derives: { name: string | undefined, flags: FlagsInterface }[] } | TraitDefinitionError[] {
 
-        const self = this;
+        // const returnParsed = (parsed: ) => { };
 
         switch (typeArgument.type) {
             //* e.g. trait<{}>(...)
             case 'TSTypeLiteral':
-                return { base: Flags.fromSignatures(typeDeclarationSignatures(typeArgument)!), derives: [] };
+                const flags = Flags.fromSignatures(typeDeclarationSignatures(typeArgument)!);
+                return !flags ? [new TraitDefinitionError('cannot construct flags', { type: PARSE_ERR_TYPE.TypeDef, kind: 1 })] : { base: flags, derives: [] };
 
             //* e.g. trait<Foo>(...)
             //* e.g. trait<Derive<[Foo, Bar, Baz],{}>>(...)
             case 'TSTypeReference':
-
-                if (typeArgument.typeName.type === 'Identifier') {
-                    const isReferenceForTrait = typeArgument.typeName.name === typeDeclaration?.id.name && typeDeclaration.typeAnnotation.type === 'TSTypeLiteral';
-                    if (isReferenceForTrait) {
-                        return { base: Flags.fromSignatures(typeDeclarationSignatures(typeDeclaration)!), derives: [] };
-                    } else if (typeArgument.typeName.name === 'Derive' && typeArgument.typeArguments) {
-                        const deriveArgs = typeArgument.typeArguments.params;
-                        if (deriveArgs.length === 2 && deriveArgs[0]?.type === 'TSTupleType' && (deriveArgs[1]?.type === 'TSTypeLiteral' || deriveArgs[1]?.type === 'TSTypeReference')) {
-                            const [tuple, type] = deriveArgs;
-                            let baseFlags: Flags;
-                            if (type.type === 'TSTypeLiteral') {
-                                baseFlags = Flags.fromSignatures(type.members);
-                            } else if (type.type === 'TSTypeReference' && type.typeName.type === 'Identifier') {
-                                const typeName = type.typeName.name;
-
-                                const localLiteral = typeDecs[typeName]?.typeAnnotation;
-                                if (localLiteral) {
-                                    baseFlags = Flags.fromSignatures(localLiteral.members);
-                                    // time to resolve derives
-                                    const derives = tuple.elementTypes;
-
-                                    const derivedFlags: { name: string | undefined; flags: FlagsInterface }[] = [];
-
-                                    let valid = true;
-                                    for (let i = 0; i < derives.length; i++) {
-                                        const element = derives[i]!;
-                                        if (element.type === 'TSTypeLiteral') {
-                                            derivedFlags.push({ name: void 0, flags: Flags.fromSignatures(element.members) });
-                                        } else if (element.type === 'TSTypeReference' && element.typeName.type === 'Identifier') {
-                                            const lookupName = element.typeName.name;
-                                            const localType = this.#types[lookupName];
-                                            if (localType) {
-                                                // TODO: add to trait flags instead of adding flags right here
-                                                derivedFlags.push({ name: localType.id.name, flags: Flags.fromSignatures(localType.typeAnnotation.members) });
-
-                                            } else {
-                                                const importVar = registry.importVar(lookupName);
-                                                if (importVar) {
-                                                    const actual = resolveReferenceFromOtherFile(project, registry.directory, importVar, lookupName);
-                                                    if (actual) {
-                                                        derivedFlags.push({ name: actual.name, flags: actual.flags });
-                                                    }
-                                                }
-                                            }
-
-                                        } else {
-                                            valid = false;
-                                            break;
-                                        }
-                                    }
-
-                                    if (valid) {
-                                        return { base: baseFlags, derives: derivedFlags }
-                                    }
-
-
-
-                                } else {
-                                    // error: type not defined locally
-                                }
-
-                            }
-
-
-
-
-                        } else {
-                            //     //! ERROR: invalid type arg
-                        }
-
-                    }
-                }
-                else {
-                    // errors.push(`trait type argument must equal trait type declaration (references an unknown type ${typeArgument.typeName.type === 'Identifier' ? typeArgument.typeName.name : ''}, but expected ${typeDeclaration?.id.name ?? name})`);
-                }
-
-                break;
+                return self.#parseTraitTypeArgumentReference(project, self, name, typeDecs, typeArgument, typeDeclaration) ?? [];
             //* Foo = trait
             //* Bar = derived trait
 
@@ -650,71 +519,226 @@ class TraitFile {
                     return type.type === 'TSTypeLiteral' || type.type === 'TSTypeReference';
                 });
 
-                if (valid) {
-                    const last = types.at(-1)!;
-                    const deriveFlags = getDerivesOfTrait(project, self, types.slice(0, types.length - 1));
-                    let flags;
-                    if (last.type === 'TSTypeLiteral') {
-                        flags = Flags.fromSignatures(last.members);
-                    } else if (last.type === 'TSTypeReference' && last.typeName.type === 'Identifier') {
-                        const lookupName = last.typeName.name;
-                        const typeDeclaration = this.#uninitTraits[lookupName]?.typeDeclaration;
-                        if (typeDeclaration) {
-                            flags = Flags.fromSignatures(typeDeclaration.typeAnnotation.members);
-                        } else {
-                            console.error('could not resolve reference for type [ %s ]', lookupName, registry.code.slice(last.start, last.end));
-                        }
-                    }
-                    if (!flags?.isDisjointFromDerives(deriveFlags.map(f => f.flags))) {
-                        console.error('could not join derives for type...');
+                if (!valid) {
+                    return [];
+                }
+
+                const deriveFlags = project.getDerivesOfTrait(project, self.#types, self.#importVars, types.slice(0, types.length - 1), self.directory);
+                console.log('INTERSECTION: %s', name, deriveFlags != null);
+
+                if (!deriveFlags) {
+                    return [];
+                }
+
+                const last = types.at(-1)!;
+                let intersection: FlagsInterface | undefined;
+                if (last.type === 'TSTypeLiteral') {
+                    intersection = Flags.fromSignatures(last.members);
+                } else if (last.type === 'TSTypeReference' && last.typeName.type === 'Identifier') {
+                    const lookupName = last.typeName.name;
+                    const typeDeclaration = this.#uninitTraits[lookupName]?.typeDeclaration;
+                    if (typeDeclaration) {
+                        intersection = Flags.fromSignatures(typeDeclaration.typeAnnotation.members);
                     } else {
-                        return { base: flags, derives: deriveFlags };
+                        console.error('could not resolve reference for type [ %s ]', lookupName, self.#result.originalCode.slice(last.start, last.end));
                     }
                 }
+
+                if (!intersection?.isDisjointFromDerives(deriveFlags.map(f => f.flags))) {
+                    console.error('could not join derives for type...');
+                } else {
+                    return { base: intersection, derives: deriveFlags };
+                }
+
                 break;
             default:
                 break;
         }
 
+        return [];
     }
 
-    resolveRef(project: Project, derivedFlags: { name: string | undefined; flags: FlagsInterface }[], lookupName: string) {
-        const registry = this.#registry;
-        const localType = this.#types[lookupName];
-        if (localType) {
-            derivedFlags.push({ name: localType.id.name, flags: Flags.fromSignatures(localType.typeAnnotation.members) })
-        } else {
-            const importVar = registry.importVar(lookupName);
-            if (importVar) {
-                const actual = resolveReferenceFromOtherFile(project, registry.directory, importVar, lookupName);
-                if (actual) {
-                    derivedFlags.push({ name: actual.name, flags: actual.flags });
+    #parseTraitTypeArgumentReference(project: Project, self: TraitFile, traitName: string, typeDecs: TraitTypeExports, typeArgument: TSTypeReference, typeDeclaration: TSTypeAliasDeclaration | undefined) {
+        if (typeArgument.typeName.type === 'Identifier') {
+            if (
+                // e.g trait<Foo>
+                // this type is a reference for the trait type alias declaration,
+                // so we can retrieve it and parse it directly
+                typeArgument.typeName.name === typeDeclaration?.id.name
+                && typeDeclaration.typeAnnotation.type === 'TSTypeLiteral'
+            ) {
+                const flags = Flags.fromSignatures(typeDeclarationSignatures(typeDeclaration)!);
+                return flags ? { base: flags, derives: [] } : void 0;
+            } else if (typeArgument.typeName.name === 'Derive' && typeArgument.typeArguments) {
+                const deriveArgs = typeArgument.typeArguments.params;
+                const errors = [];
+                const derivedFlags: { name: string | undefined; flags: FlagsInterface }[] = [];
+
+                let baseFlags!: Flags;
+
+                // e.g Derive
+                // tuple: [ Reference | ObjectLiteral ]
+                // type: Reference | ObjectLiteral
+                if (deriveArgs.length === 2 && deriveArgs[0]?.type === 'TSTupleType' && (deriveArgs[1]?.type === 'TSTypeLiteral' || deriveArgs[1]?.type === 'TSTypeReference')) {
+                    const [tuple, type] = deriveArgs;
+                    if (type.type === 'TSTypeLiteral') {
+                        const flags = Flags.fromSignatures(type.members);
+                        if (!flags) {
+                            return
+                        }
+
+                        baseFlags = flags;
+
+                    } else if (type.type === 'TSTypeReference' && type.typeName.type === 'Identifier') {
+                        const typeName = type.typeName.name;
+                        const localLiteral = typeDecs[typeName]?.typeAnnotation;
+                        if (localLiteral) {
+                            const flags = Flags.fromSignatures(localLiteral.members);
+                            if (!flags) {
+                                return;
+                            }
+
+                            baseFlags = flags;
+
+                        } else {
+                            errors.push(DeriveError.RefNotFound(self.path, typeName))
+                        }
+                    }
+
+                    // time to resolve derives
+                    const derives = tuple.elementTypes;
+                    const queuedDerives = [];
+                    for (let i = 0; i < derives.length; i++) {
+                        const element = derives[i]!;
+                        if (element.type === 'TSTypeLiteral') {
+                            const flags = Flags.fromSignatures(element.members);
+                            if (!flags) {
+                                break;
+                            }
+                            derivedFlags.push({ name: void 0, flags: flags });
+                        } else if (element.type === 'TSTypeReference' && element.typeName.type === 'Identifier') {
+                            const lookupName = element.typeName.name;
+                            const localType = this.#types[lookupName];
+
+                            if (localType) {
+                                // TODO: add to trait flags instead of adding flags right here
+                                const flags = Flags.fromSignatures(localType.typeAnnotation.members);
+                                if (!flags) {
+                                    break;
+                                }
+
+                                queuedDerives.push({ name: localType.id.name, flags: flags });
+                            } else {
+                                const importVar = self.importVar(lookupName);
+                                if (importVar) {
+                                    const actual = project.resolveReferenceFromOtherFile(project, self.directory, importVar, lookupName);
+                                    if (actual && !actual.errored) {
+                                        queuedDerives.push({ name: actual.name, flags: actual.flags });
+                                    } else {
+                                        errors.push(DeriveError.RefNotFound(self.path, lookupName));
+                                        break;
+                                    }
+                                } else {
+                                    errors.push(DeriveError.RefNotFound(self.path, lookupName))
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (derives.length === queuedDerives.length) {
+                        derivedFlags.push(...queuedDerives);
+                    } else {
+                        errors.push(DeriveError.InvalidDeriveType(self.path, traitName, self.#result.originalCode.slice(typeArgument.start, typeArgument.end)))
+                    }
+
+                } else {
+                    errors.push(DeriveError.InvalidDeriveType(self.path, traitName, self.#result.originalCode.slice(typeArgument.start, typeArgument.end)))
                 }
+
+                console.log('PARSE REFERENCE', traitName, errors.length, baseFlags.names, derivedFlags.flatMap(d => d.flags.names));
+
+
+                if (!errors.length) {
+                    return { base: baseFlags, derives: derivedFlags }
+                } else {
+                    errors.push(DeriveError.InvalidDeriveType(self.path, traitName, self.#result.originalCode.slice(typeArgument.start, typeArgument.end)))
+                    return errors;
+                }
+
             }
+        } else {
+            // errors.push(`trait type argument must equal trait type declaration (references an unknown type ${typeArgument.typeName.type === 'Identifier' ? typeArgument.typeName.name : ''}, but expected ${typeDeclaration?.id.name ?? name})`);
         }
+    }
+
+    importVar(name: string) {
+        return this.#importVars[name];
     }
 }
 
-interface FrameBase {
-    isIndex: boolean;
-    registry: FileRegistry;
-    bindings: Bindings;
-};
+function check(property: any, flags: FlagsInterface) {
+    if (property.type === 'Property') {
+        const { type: keyType } = property.key;
+        const type = property.value.type;
+        if (keyType !== 'Identifier') {
+            return false;
+        } else if (
+            type !== 'FunctionExpression'
+            && type !== 'Literal'
+            && type !== 'TemplateLiteral'
+        ) {
+            return false;
+        } else if (!flags.has(property.key.name, STATIC | DEFAULT)) {
+            return false;
+        }
+    } else {
+        const properties = property.properties;
+        for (let i = 0; i < properties.length; i++) {
+            const p = properties[i]!;
+            if (p.type === 'SpreadElement') {
+                return false;
+            } else if (
+                p.value.type !== 'FunctionExpression'
+            ) {
+                return false;
+            } else if (p.key.type === 'Identifier' && !flags.has(p.key.name, INSTANCE | DEFAULT)) {
+                return false;
+            }
+        }
+    }
+    return true;
 
-class Frame implements FrameBase {
-    isIndex: boolean;
-    registry: FileRegistry;
-    bindings: Bindings;
-    constructor(isIndex: boolean, result: ParseFileResultResult) {
-        this.isIndex = isIndex;
-        this.registry = new FileRegistry(result);
-        this.bindings = new Bindings();
+}
+
+function parseTraitImplementation(properties: TraitObjectProperty[], flags: FlagsInterface): DefaultMethods | undefined {
+    const defaultMethods = new DefaultMethods();
+    let valid = true;
+    for (let i = 0; i < properties.length; i++) {
+        const prop = properties[i]!;
+        const propName = prop.key.name;
+
+        if (propName === 'instance' && prop.value.type === 'ObjectExpression') {
+            if (!check(prop.value, flags)) {
+                valid = false;
+                break;
+            }
+            defaultMethods.add(propName, prop.value.start, prop.end);
+        } else {
+            if (!check(prop, flags)) {
+                valid = false;
+                break
+            }
+            defaultMethods.add(propName, prop.start, prop.end);
+        }
     }
 
-    get result() {
-        return this.registry.parseResult;
-    }
+    return valid ? defaultMethods : void 0;
+}
 
+interface Frame {
+    isIndex: boolean;
+    file: TraitFile;
 }
 
 class Stack {
@@ -722,7 +746,7 @@ class Stack {
     #ids: Map<FilePath, number>;
     constructor(initial: Frame) {
         this.#stack = [initial];
-        this.#ids = new Map([[initial.registry.path, 0]]);
+        this.#ids = new Map([[initial.file.path, 0]]);
     }
 
     get length() {
@@ -731,7 +755,7 @@ class Stack {
 
     push(frame: Frame): number {
         const id = this.#stack.length;
-        this.#ids.set(frame.registry.path, id);
+        this.#ids.set(frame.file.path, id);
         this.#stack.push(frame);
         return id;
     }
@@ -761,6 +785,8 @@ type UninitializedTraits = Record<string, {
 
 type TraitExports = Record<string, ExportedTraitDeclaration>;
 type TraitTypeExports = Record<string, TraitAliasDeclaration>;
+
+type ResolvedRef = TraitDefinition | { name: string | undefined; flags: FlagsInterface };
 
 class Project {
     #cwd: string;
@@ -826,22 +852,25 @@ class Project {
             print('Project', `trait dir = ${result.originalRequest}`);
         }
 
-        return new Stack(new Frame(true, result));
+        return new Stack({ isIndex: true, file: new TraitFile(result) });
     }
 
     initialize() {
-        const project = this;
-        const files = project.#files;
+        const project = this,
+            files = project.#files;
+
         for (let i = 0; i < files.length; i++) {
-            const file = files[i]!;
-            file.initialize(project);
+            files[i]!.initialize(project);
         }
     }
 
     add(traitFile: TraitFile): number {
-        const id = this.#files.length;
-        this.#files.push(traitFile);
-        this.#ids[traitFile.path] = id;
+        const files = this.#files,
+            ids = this.#ids;
+
+        const id = files.length;
+        files.push(traitFile);
+        ids[traitFile.path] = id;
         return id;
     }
 
@@ -849,6 +878,100 @@ class Project {
         const index = this.#ids[path];
         return index == null ? void 0 : this.#files[index];
     }
+
+
+    getDerivesOfTrait(project: Project, localTypes: TraitTypeExports, importRegistry: ImportRegistry, derives: UnresolvedDerivesOfTrait, directory: string): { name: string | undefined; flags: FlagsInterface }[] | undefined {
+        const resolved: ResolvedRef[] = [];
+        for (let i = 0; i < derives.length; i++) {
+            const type = derives[i]!;
+            if (type.type === 'TSTypeLiteral') {
+                const flags = Flags.fromSignatures(type.members);
+                if (!flags) {
+                    return;
+                }
+
+                resolved.push({ name: void 0, flags: flags });
+            } else {
+                if (type.typeName.type !== 'Identifier') {
+                    return
+
+                }
+
+                let ref;
+                if (type.typeName.name === 'Infer' && type.typeArguments && type.typeArguments.params[0]?.type === 'TSTypeQuery' && type.typeArguments.params[0].exprName.type === 'Identifier') {
+                    const typeQuery = type.typeArguments.params[0];
+                    // @ts-expect-error
+                    const typeName = typeQuery.exprName.name;
+                    ref = project.resolveRef(project, localTypes, importRegistry, directory, typeName);
+
+                } else {
+                    ref = project.resolveRef(project, localTypes, importRegistry, directory, type.typeName.name);
+                }
+
+                if (ref) {
+                    if (ref instanceof TraitDefinition) {
+                        if (ref.errored) {
+                            return
+                        }
+                        resolved.push(ref);
+
+                    } else {
+                        resolved.push(ref);
+                    }
+
+                }
+            }
+
+        }
+
+        return resolved;
+    }
+
+    resolveRef(project: Project, localTypes: TraitTypeExports, importRegistry: ImportRegistry, directory: string, lookupName: string):
+        ResolvedRef | undefined {
+        const localType = localTypes[lookupName];
+        if (localType) {
+            const flags = Flags.fromSignatures(localType.typeAnnotation.members);
+            if (!flags) {
+                return;
+            }
+
+            return { name: localType.id.name, flags: flags };
+        } else {
+            const importVar = importRegistry[lookupName];
+            if (importVar) {
+                const actual = project.resolveReferenceFromOtherFile(project, directory, importVar, lookupName);
+                if (actual) {
+                    return actual;
+                }
+            }
+        }
+    }
+
+    resolveReferenceFromOtherFile(project: Project, directory: string, importVar: ModuleImport, localName: string) {
+        const resolver = project.resolver;
+        const resolvedRequest = resolver.sync(directory, importVar.moduleRequest);
+        if (resolvedRequest.path) {
+            if (resolvedRequest.path.startsWith(project.#cwd)) {
+
+                const previous = project.get(resolvedRequest.path);
+                if (previous) {
+                    const resolvedName = importVar.localToImport[localName]!;
+                    if (resolvedName) {
+                        return previous.trait(resolvedName);
+                    }
+                }
+            } else {
+                // TODO: node_module:
+                // * if unparsed:
+                // * 1. check directory of package.json for {trait,traits}.json or {trait,traits}.data.json
+                // * 2. parse and if successful, add to cache for future lookups
+            }
+        }
+    }
+
+
+
 
     async #getEntry() {
         const entryOrError = await parseConfig(this.#cwd);
@@ -861,16 +984,14 @@ class Project {
 }
 
 async function scanFile(project: Project, stack: Stack, frame: Frame) {
-    const registry = frame.registry;
-    const file = new TraitFile(registry);
     const vars: TraitExports = {};
     const types: TraitTypeExports = {};
-    const exportNames = await registry.register(project.resolver, stack, frame, file, project.indexFilter);
-
+    const file = frame.file;
+    const exportNames = await file.register(project.resolver, stack, frame, file, project.indexFilter);
     const uninitialized: UninitializedTraits = Object.create(null);
 
     if (VERBOSE) {
-        print('Frame', registry.path);
+        print('Frame', file.path);
     }
 
 
@@ -878,7 +999,7 @@ async function scanFile(project: Project, stack: Stack, frame: Frame) {
         console.log('-'.repeat(32));
     }
 
-    walk(frame.result.program, {
+    walk(frame.file.result.program, {
         enter(node, parent) {
             if (parent && isDeclaredInModule(parent, node)) {
                 if (node.type === 'VariableDeclaration') {
@@ -971,70 +1092,6 @@ async function resolve(
 }
 
 type UnresolvedDerivesOfTrait = (TSTypeLiteral | TSTypeReference)[];
-
-function getDerivesOfTrait(project: Project, file: TraitFile, derives: UnresolvedDerivesOfTrait): { name: string | undefined; flags: FlagsInterface }[] {
-    const resolved: { name: string | undefined; flags: FlagsInterface }[] = [];
-    for (let i = 0; i < derives.length; i++) {
-        const type = derives[i]!;
-        if (type.type === 'TSTypeLiteral') {
-            resolved.push({ name: void 0, flags: Flags.fromSignatures(type.members) });
-        } else {
-            if (type.typeName.type === 'Identifier') {
-                if (type.typeName.name === 'Infer' && type.typeArguments && type.typeArguments.params[0]?.type === 'TSTypeQuery' && type.typeArguments.params[0].exprName.type === 'Identifier') {
-                    const typeQuery = type.typeArguments.params[0];
-                    // @ts-expect-error
-                    const typeName = typeQuery.exprName.name;
-                    // const local = file.trait(typeName);
-                    // console.log('GET DERIVES OF TRAIT - LOCAL: ', local);
-                    file.resolveRef(project, resolved, typeName)
-                } else {
-                    file.resolveRef(project, resolved, type.typeName.name);
-                    // const ref = resolveReferenceFromOtherFile(project, file.directory, file.registry.importVar(type.typeName.name)!, type.typeName.name);
-                    // if (ref) {
-                    //     resolved.push(ref);
-                    // } else {
-                    //     // error: not found ???
-                    // }
-                }
-            }
-        }
-
-    }
-
-
-    return resolved;
-}
-
-function resolveReferenceFromOtherFile(project: Project, directory: string, importVar: ModuleImport, localName: string) {
-    const resolver = project.resolver;
-    const resolvedRequest = resolver.sync(directory, importVar.moduleRequest);
-    // console.log(project.get(res));
-
-    // console.log('found import var, time to resolve!', resolvedRequest.path);
-    if (resolvedRequest.path) {
-        const previous = project.get(resolvedRequest.path);
-        if (previous) {
-            const resolvedName = importVar.localToImport[localName]!;
-
-            // const resolvedName = importVar.entries.find(e => e.localName.value === localName)?.importName.name;
-            if (resolvedName) {
-                return previous.trait(resolvedName);
-            }
-        }
-    }
-}
-
-function resolveReference(project: Project, registry: FileRegistry, lookupName: string, derivedFlags: { name: string | undefined; flags: FlagsInterface }[]) {
-    const importVar = registry.importVar(lookupName);
-    if (importVar) {
-        const actual = resolveReferenceFromOtherFile(project, registry.directory, importVar, lookupName);
-        if (actual) {
-            derivedFlags.push({ name: actual.name, flags: actual.flags });
-        }
-    }
-}
-
-//! PARSE TRAIT TYPE END
 
 function tryResolveSync(resolver: ResolverFactory, directory: string, request: string) {
     try { return resolver.sync(directory, request) } catch (error) { }

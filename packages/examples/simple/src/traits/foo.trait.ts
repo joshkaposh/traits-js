@@ -49,9 +49,9 @@ export const Foo = trait<{
         reqInstanceFoo(): void;
     };
 }>({
-    // [include]: {
-    //     defaultstaticFoo: []
-    // },
+    [include]: {
+        defaultstaticFoo: []
+    },
     defaultstaticFoo() {
         this.CONSTANT;
         this.defaultstaticFoo();

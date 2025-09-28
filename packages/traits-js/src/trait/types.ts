@@ -1,4 +1,4 @@
-import { instance } from './modifier';
+import { include, instance } from './modifier';
 
 export type MethodRecord = Record<string, (...args: any[]) => any>;
 export type ConstKey = Uppercase<string>;
@@ -23,6 +23,9 @@ export type Infer<T> = T extends ImplFn<infer Type> ? Type : never;
  * Adds every `TraitRecord` (i.e _trait_) in `Ttype` to `Tclass`.
  */
 export type Trait<Tclass, Ttype extends Array<object>> = Merge<Tclass, Ttype>;
+
+type IncludeRecord<T> = Partial<Record<DefaultKeysOf<T>, unknown[]>>
+
 /**
  * ### Usage
  * 
@@ -41,9 +44,12 @@ export type Trait<Tclass, Ttype extends Array<object>> = Merge<Tclass, Ttype>;
  * declare function myFn(impl: Impl<MyTrait>):void
  * ```
  */
-export type Impl<T extends object> = (T extends { [instance]?: infer I extends Partial<MethodRecord> } ? {
-    [instance]: DefaultMethods<I>
-} : {}) & DefaultMethods<T> & ThisType<Normalize<T>>;
+export type ImplObject<T extends object> = ({ [include]?: IncludeRecord<T> } & (T extends { [instance]?: infer I extends Partial<MethodRecord> } ? {
+    [instance]: DefaultMethods<I> & {
+        [include]?: IncludeRecord<I>;
+    };
+} : {}) & DefaultMethods<T> & ThisType<Normalize<T>>);
+
 export type Derive<Base extends any[], T extends object> = MergeProps<Base> & T;
 
 export type AddDerives<Tclass, Ttype extends Array<DeriveFn>> = Trait<Tclass, InferTypes<Ttype>>;

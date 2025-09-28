@@ -8,9 +8,8 @@ export interface TypeArguments extends TSTypeParameterInstantiation {
 
 export interface TraitObjectProperty extends ObjectProperty {
     key: IdentifierReference;
-    value: Function | TSLiteral;
+    value: Function | TSLiteral | ObjectExpression;
 }
-
 export interface TraitObjectExpression extends ObjectExpression {
     properties: TraitObjectProperty[];
 }

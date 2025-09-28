@@ -9,6 +9,7 @@ export const PARSE_ERR_TYPE = {
     Ident: 0,
     Const: 1,
     Method: 2,
+    TypeDef: 3,
 } as const;
 
 export type IDENT_ERR = typeof IDENT_ERR[keyof typeof IDENT_ERR];
@@ -32,6 +33,13 @@ export type METHOD_ERR = typeof METHOD_ERR[keyof typeof METHOD_ERR];
 export const METHOD_ERR = {
     RequiredDefined: 0,
 } as const;
+
+
+export type TYPE_DEF_ERR = typeof TYPE_DEF_ERR[keyof typeof TYPE_DEF_ERR];
+export const TYPE_DEF_ERR = {
+    Invalid: 0,
+} as const;
+
 
 // interface ErrorData {
 //     type: PARSE_ERR_TYPE;
@@ -112,4 +120,17 @@ export const ParseError = {
     RequiredMethodHasDefinition(name: string) {
         return new TraitDefinitionError('required method cannot be defined', { type: PARSE_ERR_TYPE.Method, kind: METHOD_ERR.RequiredDefined, name })
     }
+} as const;
+
+
+export type DeriveError = {
+    [K in keyof typeof DeriveError]: ReturnType<typeof DeriveError[K]>;
+}[keyof typeof DeriveError];
+export const DeriveError = {
+    RefNotFound(file: string, name: string) {
+        return new TraitDefinitionError(`SyntaxError: could not resolve ${name} in [ ${file} ]\nIf this was a variable, it will throw at runtime`, { type: PARSE_ERR_TYPE.TypeDef, kind: 0 });
+    },
+    InvalidDeriveType(file: string, name: string, code: string) {
+        return new TraitDefinitionError(`DeriveError: ${name} in [ ${file} ] has an invalid derive (used Derive<[Foo], Bar>, but the type arguments were incorrect)`, { type: PARSE_ERR_TYPE.TypeDef, kind: 0 });
+    },
 } as const;

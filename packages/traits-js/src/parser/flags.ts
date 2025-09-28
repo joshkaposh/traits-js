@@ -1,4 +1,5 @@
 import type { TSSignature } from "oxc-parser";
+import type { TraitDefinition } from "./definition";
 
 export const CONST = 0x00001;
 export const STATIC = 0x00010;
@@ -91,6 +92,11 @@ export interface FlagsInterface {
 
     readonly names: readonly string[];
     readonly nameSet: Readonly<Set<string>>;
+    readonly staticDefaultNames: Readonly<Set<string>>;
+    readonly staticRequiredNames: Readonly<Set<string>>;
+    readonly instanceDefaultNames: Readonly<Set<string>>;
+    readonly instanceRequiredNames: Readonly<Set<string>>;
+
 
     readonly flags: readonly number[];
 
@@ -115,6 +121,11 @@ export interface FlagsInterface {
 
 export class Flags implements FlagsInterface {
     #names: readonly string[];
+    #staticRequired: Readonly<Set<string>>;
+    #staticDefault: Readonly<Set<string>>;
+    #instanceRequired: Readonly<Set<string>>;
+    #instanceDefault: Readonly<Set<string>>;
+
     #nameSet: Set<string>;
     #flags: readonly number[];
     #byName: Record<string, number>;
@@ -125,10 +136,39 @@ export class Flags implements FlagsInterface {
         flags: readonly number[],
         byName: Record<string, number>,
     ) {
+
+        const sr = new Set<string>(),
+            sd = new Set<string>(),
+            ir = new Set<string>(),
+            id = new Set<string>();
+
+        for (let index = 0; index < names.length; index++) {
+            const f = flags[index]!;
+            const n = names[index]!;
+            if (f & STATIC) {
+                if (f & REQUIRED) {
+                    sr.add(n)
+                } else {
+                    sd.add(n)
+                }
+            } else {
+                if (f & REQUIRED) {
+                    ir.add(n)
+                } else {
+                    id.add(n)
+                }
+            }
+
+        }
+
         this.#names = names;
         this.#flags = flags;
-        this.#nameSet = new Set(names);
         this.#byName = byName;
+        this.#nameSet = new Set(names);
+        this.#staticRequired = sr;
+        this.#staticDefault = sd;
+        this.#instanceRequired = ir;
+        this.#instanceDefault = id;
         this.#len = names.length;
     }
 
@@ -177,14 +217,22 @@ export class Flags implements FlagsInterface {
                             addFlags(INSTANCE | (signature.optional ? DEFAULT : REQUIRED), signature.key.name, names, flags, byName)
                         }
                     }
+                } else {
+                    return
                 }
             } else if (signature.type === 'TSMethodSignature' && signature.key.type === 'Identifier') {
                 //! STATIC
                 addFlags(STATIC | (signature.optional ? DEFAULT : REQUIRED), signature.key.name, names, flags, byName)
+            } else {
+                return;
             }
         }
 
         return new Flags(names, flags, byName);
+    }
+
+    static withDerives(base: FlagsInterface, derivedFlags: DerivedFlags) {
+        return FlagsWithDerives.fromDerives(base, derivedFlags);
     }
 
     get names() {
@@ -198,6 +246,25 @@ export class Flags implements FlagsInterface {
     get nameSet() {
         return this.#nameSet;
     }
+
+    get staticDefaultNames() {
+        return this.#staticDefault;
+    }
+
+    get staticRequiredNames() {
+        return this.#staticRequired;
+
+    }
+
+    get instanceDefaultNames() {
+        return this.#instanceDefault;
+    }
+
+    get instanceRequiredNames() {
+        return this.#instanceRequired;
+
+    }
+
 
     has(name: string, flag: number) {
         const f = this.#byName[name];
@@ -272,15 +339,11 @@ export class Flags implements FlagsInterface {
     }
 }
 
-function addFlags(flag: number, name: string, names: string[], flags: number[], byName: Record<string, number>) {
-    names.push(name);
-    flags.push(flag);
-    byName[name] = flag;
-}
+export type ParsedDerives = ({ implicit: true; type: FlagsInterface } | { implicit: false; type: TraitDefinition })[]
 
-type DerivedFlags = Array<{ name: string | undefined; flags: FlagsInterface }>;
+export type DerivedFlags = Array<{ name: string | undefined; flags: FlagsInterface }>;
 
-export class FlagsWithDerives implements FlagsInterface {
+class FlagsWithDerives implements FlagsInterface {
     #flags: FlagsInterface;
     #joined: FlagsInterface;
     #namedDerives: Record<string, FlagsInterface>;
@@ -291,7 +354,6 @@ export class FlagsWithDerives implements FlagsInterface {
     }
 
     static fromDerives(base: FlagsInterface, derives: DerivedFlags) {
-
         const named: Record<string, FlagsInterface> = Object.create(null);
         const byName: Record<string, number> = Object.create(null);
         const derivedNames: Array<string> = [];
@@ -321,13 +383,14 @@ export class FlagsWithDerives implements FlagsInterface {
         derivedNames.push(...base.names);
         derivedFlags.push(...base.flags);
 
+
         return new FlagsWithDerives(
             named,
             base,
             new Flags(
-                derivedNames.flatMap(n => n),
-                derivedFlags.flatMap(f => f),
-                {}
+                derivedNames,
+                derivedFlags,
+                byName
             ),
         );
     }
@@ -338,6 +401,24 @@ export class FlagsWithDerives implements FlagsInterface {
 
     get nameSet() {
         return this.#joined.nameSet;
+    }
+
+    get staticDefaultNames() {
+        return this.#joined.staticDefaultNames;
+    }
+
+    get staticRequiredNames() {
+        return this.#joined.staticRequiredNames;
+
+    }
+
+    get instanceDefaultNames() {
+        return this.#joined.instanceDefaultNames;
+    }
+
+    get instanceRequiredNames() {
+        return this.#joined.instanceRequiredNames;
+
     }
 
     get flags() {
@@ -433,7 +514,7 @@ export class FlagsWithDerives implements FlagsInterface {
 
 }
 
-export class FlagsIterator {
+class FlagsIterator {
     #index: number;
     #flags: readonly number[];
     #names: readonly string[];
@@ -509,4 +590,10 @@ class ChainedFlagsIterator {
     [Symbol.iterator]() {
         return this;
     }
+}
+
+function addFlags(flag: number, name: string, names: string[], flags: number[], byName: Record<string, number>) {
+    names.push(name);
+    flags.push(flag);
+    byName[name] = flag;
 }
