@@ -1,40 +1,59 @@
-import { derive, type Infer, type Trait } from "traits-js";
-import { Bar } from "./traits";
+import { type Infer, instance, type TraitClass, derive, type DeriveFn, trait, type Derive } from "traits-js";
+import { Foo, Bar } from "./traits";
 
-// //! Using trait manually
-const BarManual = Bar({
-    CONSTANT: 5,
-    requiredMethod() { },
-    additionalMethod() { },
-})(class BarManual {
-    static staticProp = 5 as const;
-    instanceProp = 10 as const;
+const What = derive<[Foo, Bar]>({
+    CONSTANT: 1,
+    reqStaticFoo() { },
+    requiredStaticBar() { },
+    [instance]: {
+        reqInstanceFoo() { },
+        reqInstanceBar() { },
+    }
 });
 
-BarManual.staticProp;
-new BarManual().instanceProp;
+What.CONSTANT;
+What.reqStaticFoo;
+What.defaultstaticFoo;
+new What().defaultInstanceFoo();
+new What().reqInstanceFoo();
+new What().requiredStaticBar();
 
-BarManual.CONSTANT;
-BarManual.additionalMethod;
-BarManual.requiredMethod;
+const What2 = derive<[Foo, Bar]>({
+    CONSTANT: 1,
+    requiredStaticBar() { },
+    reqStaticFoo() { },
+    [instance]: {
+        reqInstanceFoo() { },
+        reqInstanceBar() { },
+    }
+})
 
 
-BarManual.defaultMethod;
-new BarManual().defaultInstanceMethod;
 
+// class MyClassDerives extends derive<[Foo, Bar]>({
 
-// //! Using derive helper
-const Derived = derive(
-    class MyClass {
-        static staticProp = 5;
-        instanceProp = 10;
-    },
-    Bar({
-        CONSTANT: 5,
-        requiredMethod() { },
-        additionalMethod() { },
-    })
-);
+// }) {
+//     static someProp = 5;
+//     instanceProp = 10;
+// }
+
+// // //! Using derive helper
+// const Derived = deriveOld(
+//     class MyClass {
+//         static staticProp = 5;
+//         instanceProp = 10;
+//     },
+//     Bar({
+//         CONSTANT: 1,
+//         reqStaticFoo() { },
+//         requiredStaticBar() { },
+//         [instance]: {
+//             reqInstanceFoo() { },
+//             reqInstanceBar() { },
+
+//         }
+//     })
+// );
 
 // Derived.staticProp;
 // Derived.CONSTANT;
@@ -44,22 +63,32 @@ const Derived = derive(
 // new Derived().instanceProp;
 // new Derived().instanceMethod();
 
-// //! Using trait that derives another trait
-derive(class { }, Bar({
-    CONSTANT: 5,
-    requiredMethod() { },
-    additionalMethod() { },
-}));
+//! Using trait that derives another trait
+// deriveOld(class { }, Bar({
+//     CONSTANT: 1,
+//     reqStaticFoo() { },
+//     requiredStaticBar() { },
+//     [instance]: {
+//         reqInstanceFoo() { },
+//         reqInstanceBar() { },
+
+//     }
+// }));
 
 // //! Using trait as a decorator
 @Bar({
-    CONSTANT: 5,
-    requiredMethod() { },
-    additionalMethod() { },
+    CONSTANT: 1,
+    reqStaticFoo() { },
+    requiredStaticBar() { },
+    [instance]: {
+        reqInstanceFoo() { },
+        reqInstanceBar() { },
+
+    }
 })
 class Untyped { }
 //! we must perform a cast to get rid of typescript errors
-const Typed = Untyped as Trait<typeof Untyped, [Infer<typeof Bar>]>;
+const Typed = Untyped as TraitClass<typeof Untyped, [Infer<typeof Bar>]>;
 Typed.CONSTANT;
 
 

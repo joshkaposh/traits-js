@@ -1,3 +1,5 @@
 export type * from './types';
 export * from './modifier';
-export * from './trait';
+export * from './define';
+export * from './derive'
+export * from './derive-old';
