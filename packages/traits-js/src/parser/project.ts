@@ -8,8 +8,7 @@ import { declarationName, isDeclaredInModule, type TraitDeclaration, type TraitA
 import type { ParsedTraitConfigExport } from "../config";
 import { Flags, type FlagsInterface } from "./flags";
 import { TraitDefinition } from "./definition";
-import { TraitFile, type RegisterReExportsFn, type UninitializedTraits } from "./trait-file";
-import type { ParseFileResult, ParseFileResultResult } from "./types";
+import { TraitFile } from "./trait-file";
 import { Registry, type ImportRegistry, type ModuleImport } from "./registry";
 import { walk } from "oxc-walker";
 import { print } from "./helpers";
@@ -23,16 +22,12 @@ type ExportedTraitDeclaration = {
     type?: TSTypeLiteral | TSTypeReference;
 };
 
-type ProjectOptions = {
+export type ProjectOptions = {
     cwd: string,
     resolverOptions?: NapiResolveOptions,
     verbose?: boolean;
-    onError?: Partial<RegisterErrorMap>;
 };
 
-type RegisterErrorMap = {
-    TRAIT: (message: string) => void | Promise<void>;
-}
 
 type TraitExports = Record<string, ExportedTraitDeclaration>;
 type TraitTypeExports = Record<string, TraitAliasDeclaration>;
@@ -52,9 +47,6 @@ let VERBOSE = false;
 export class Project {
     #cwd: string;
     #resolver: ResolverFactory;
-    /** dict of error handlers */
-    #errors: RegisterErrorMap;
-
     #files: TraitFile[];
     #ids: Record<string, number>;
 
@@ -67,8 +59,6 @@ export class Project {
         resolverOptions.preferAbsolute = true;
         resolverOptions.extensions = Array.from(new Set(resolverOptions.extensions ?? []).union(new Set(['.ts'])))
 
-        const errors = options.onError ?? Object.create(null);
-        errors.TRAIT ??= () => { };
 
         VERBOSE = options.verbose ?? false;
 
@@ -77,7 +67,6 @@ export class Project {
         }
 
         this.#resolver = new ResolverFactory(resolverOptions);
-        this.#errors = errors;
         this.#files = [];
         this.#ids = {};
         this.#cwd = cwd;
@@ -126,17 +115,17 @@ export class Project {
         return s;
     }
 
-    initialize() {
-        const project = this,
-            files = project.#files;
-
-        for (let i = 0; i < files.length; i++) {
-            files[i]!.parseDerives(project);
+    async register(stack: Stack<TraitFile>) {
+        const self = this;
+        while (stack.length) {
+            const frame = stack.pop()!;
+            await self.scan(stack, frame);
         }
+
     }
 
-
-    static async register(project: Project, stack: Stack<TraitFile>, file: TraitFile) {
+    async scan(stack: Stack<TraitFile>, file: TraitFile) {
+        const project = this;
         const resolver = project.#resolver;
         const indexFilter = project.#indexFileNameFilter;
         const vars: TraitExports = {};
@@ -219,8 +208,17 @@ export class Project {
             }
         }
 
-        file.addUninitializedTraits(traits);
+        file.addDefinitions(traits);
         project.add(file);
+    }
+
+    initialize() {
+        const project = this,
+            files = project.#files;
+
+        for (let i = 0; i < files.length; i++) {
+            files[i]!.parseDerives(project);
+        }
     }
 
     add(traitFile: TraitFile): number {

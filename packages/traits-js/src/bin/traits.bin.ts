@@ -1,8 +1,9 @@
 import { parseArgs } from 'node:util';
-import { register } from '../parser';
 import { join } from 'node:path';
+import { Project } from '../parser/project';
+import { timestamp } from '../parser/helpers';
 
-const { values, positionals } = parseArgs({
+const { values, positionals: _ } = parseArgs({
     options: {
         register: {
             type: 'string'
@@ -12,4 +13,25 @@ const { values, positionals } = parseArgs({
 
 const cwd = process.cwd();
 const root = values.register ? join(cwd, values.register) : cwd;
-await register(root);
+
+const project = new Project({
+    cwd: root,
+});
+
+let then = performance.now();
+
+console.log('Starting traits register...\n');
+const stack = await project.createStack();
+console.log(timestamp('resolve-entry', then));
+
+then = performance.now();
+
+await project.register(stack);
+
+console.log(timestamp('register', then));
+
+then = performance.now();
+project.initialize();
+console.log(timestamp('initialize', then));
+
+process.exit(0);

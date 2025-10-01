@@ -1,4 +1,4 @@
-import type { PropertyKey, Span } from "oxc-parser";
+import type { Span } from "oxc-parser";
 
 type TRAIT_ERROR = typeof TRAIT_ERROR[keyof typeof TRAIT_ERROR];
 const TRAIT_ERROR = {
