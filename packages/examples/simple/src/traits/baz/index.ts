@@ -1,1 +1,1 @@
-export { Baz } from './baz.trait';
+export * from './baz.trait';

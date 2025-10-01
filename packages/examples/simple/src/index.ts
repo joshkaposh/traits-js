@@ -1,81 +1,75 @@
-import { type Infer, instance, type TraitClass, derive, type DeriveFn, trait, type Derive } from "traits-js";
-import { Foo, Bar } from "./traits";
+import { instance, derive, trait, type Trait, type TraitClass } from "traits-js";
+import { Foo, Bar, SayHello } from "./traits";
 
-const What = derive<[Foo, Bar]>({
-    CONSTANT: 1,
-    reqStaticFoo() { },
-    requiredStaticBar() { },
-    [instance]: {
-        reqInstanceFoo() { },
-        reqInstanceBar() { },
+class _Person implements SayHello {
+    #name: string;
+    #dadsName: string;
+    #momsName: string;
+    constructor(name: string, momsName: string, dadsName: string) {
+        this.#name = name;
+        this.#momsName = momsName;
+        this.#dadsName = dadsName;
     }
-});
 
-What.CONSTANT;
-What.reqStaticFoo;
-What.defaultstaticFoo;
-new What().defaultInstanceFoo();
-new What().reqInstanceFoo();
-new What().requiredStaticBar();
-
-const What2 = derive<[Foo, Bar]>({
-    CONSTANT: 1,
-    requiredStaticBar() { },
-    reqStaticFoo() { },
-    [instance]: {
-        reqInstanceFoo() { },
-        reqInstanceBar() { },
+    [instance] = {
+        name() {
+            const self = this as unknown as InstanceType<typeof _Person>;
+            return self.#name;
+        },
+        greet(other: any) {
+            const self = this as unknown as InstanceType<typeof _Person>;
+            if (other.name() === self.#dadsName) {
+                console.log('Hey, dad!');
+            } else if (other.name() === self.#momsName) {
+                console.log('Hey, mom!');
+            } else {
+                console.log(this.greet(other));
+            }
+        }
     }
-})
+
+}
+
+class _Person2 extends derive<[Foo, SayHello]>({
+    CONSTANT: 1,
+    reqStaticFoo() {
+
+    },
+    [instance]: {
+        reqInstanceFoo() {
+
+        },
+        name() {
+            return '';
+        },
+    }
+}) {
+    #name: string;
+    constructor(name: string) {
+        super();
+        this.#name = name;
+    }
 
 
+}
 
-// class MyClassDerives extends derive<[Foo, Bar]>({
+const Person: TraitClass<typeof _Person, [SayHello]> = _Person as any;
 
-// }) {
-//     static someProp = 5;
-//     instanceProp = 10;
-// }
+const mom = new Person('Victoria', 'Mavis', 'Ron');
+const me = new Person('Joshua', 'Victoria', 'Mark');
 
-// // //! Using derive helper
-// const Derived = deriveOld(
-//     class MyClass {
-//         static staticProp = 5;
-//         instanceProp = 10;
-//     },
-//     Bar({
-//         CONSTANT: 1,
-//         reqStaticFoo() { },
-//         requiredStaticBar() { },
-//         [instance]: {
-//             reqInstanceFoo() { },
-//             reqInstanceBar() { },
+console.log(mom.name()); //* Victoria
+console.log(me.name()); //* Joshua
 
-//         }
-//     })
-// );
+mom.sayHello(); //* "Victoria says hello!"
+me.sayHello(); //* "Joshua says hello!"
 
-// Derived.staticProp;
-// Derived.CONSTANT;
-// Derived.requiredMethod;
-// Derived.defaultMethod;
-// Derived.additionalMethod;
-// new Derived().instanceProp;
-// new Derived().instanceMethod();
+// ! DEFAULT
+me.greet(mom) //* "Hello Victoria, I'm Joshua. Nice to meet you!";
+// ! CUSTOM GREET
+me.greet(mom) //* "Hey, mom!";
 
-//! Using trait that derives another trait
-// deriveOld(class { }, Bar({
-//     CONSTANT: 1,
-//     reqStaticFoo() { },
-//     requiredStaticBar() { },
-//     [instance]: {
-//         reqInstanceFoo() { },
-//         reqInstanceBar() { },
 
-//     }
-// }));
-
-// //! Using trait as a decorator
 @Bar({
     CONSTANT: 1,
     reqStaticFoo() { },
@@ -83,12 +77,11 @@ const What2 = derive<[Foo, Bar]>({
     [instance]: {
         reqInstanceFoo() { },
         reqInstanceBar() { },
-
     }
 })
 class Untyped { }
 //! we must perform a cast to get rid of typescript errors
-const Typed = Untyped as TraitClass<typeof Untyped, [Infer<typeof Bar>]>;
-Typed.CONSTANT;
+// const Typed = Untyped as Type<typeof Untyped, [Trait<typeof Bar>]>;
+// Typed.CONSTANT;
 
 

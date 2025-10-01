@@ -1,4 +1,4 @@
-import type { ImplFn, Trait, TraitRecord, ValidClass } from "./types";
+import type { Derive, ImplFn, MergeProps, TraitImplementation, TraitRecord, ValidClass } from "./types";
 // TODO: add list of advanced usage examples... after I implement them (Traits deriving other Traits, generic Traits)
 /**
  * # Usage
@@ -63,8 +63,7 @@ import type { ImplFn, Trait, TraitRecord, ValidClass } from "./types";
  * - _any_ default method(s) __must__ be implemented by trait `T`
  * - _any_ default method(s) overridden in a deriving type `D`  __must have the same type signature__ as defined in `T`
  */
-// @ts-ignore
-export function trait<const T extends TraitRecord>(type: Trait<T>): ImplFn<T> {
+export function trait<const T extends TraitRecord | TraitRecord[], Normalized = T extends [...infer D extends TraitRecord[], infer Base extends TraitRecord] ? Derive<D, Base> : T, N extends TraitRecord = Normalized extends TraitRecord ? Normalized : never, Self = T extends any[] ? MergeProps<T> : T>(type: TraitImplementation<N, Self>): ImplFn<N> {
     // @ts-ignore
     return <D extends T>(impl: D) => {
         return <C extends ValidClass>(target: C) => target as any;

@@ -1,32 +1,68 @@
-import { instance, trait, type Derive } from "traits-js";
+import { instance, trait, type Trait } from "traits-js";
 import { Foo as FooType } from "./foo.trait";
 
 //* "Bar" trait implements "Foo" trait
 
 export type Bar = {
     requiredStaticBar(): void;
-    [instance]: {
+    defaultStaticBar?(): void;
+    [instance]?: {
         reqInstanceBar(): void;
     }
 };
-export const Bar = trait<Derive<[FooType], Bar>>({
-    defaultstaticFoo() { },
+
+export type Bar1 = { bar1?(): void };
+export const Bar1 = trait<[FooType, Bar1]>({
+    bar1() {
+    },
     [instance]: {
-        defaultInstanceFoo() { },
+        defaultInstanceFoo() { }
     }
 });
 
-export const BarIntersection = trait<FooType & { barIntersection(): void; barDefaultIntersection?(): void }>({
+export const Bar = trait<Bar>({
+    defaultStaticBar() { }
+});
+
+export const Bar2 = trait<[Bar, Bar1, { bar2?(): void }]>({
+    bar2() {
+        this.bar1();
+        this.bar2();
+        this.requiredStaticBar();
+        this.defaultStaticBar();
+    }
+});
+
+export const BarLiteral = trait<{ BarLiteral(): void; BarDefaultLiteral?(): void }>({
+    BarDefaultLiteral() { }
+});
+
+export const BarIntersectionImplicit = trait<[FooType, { barImplicitIntersection(): void; barDefaultImplicitIntersection?(): void }]>({
+    barDefaultImplicitIntersection() {
+        this.CONSTANT;
+        this.defaultstaticFoo();
+        this.reqStaticFoo();
+        this.barDefaultImplicitIntersection();
+        this.barImplicitIntersection();
+    },
+    [instance]: {
+        defaultInstanceFoo() {
+            this.defaultInstanceFoo();
+            this.reqInstanceFoo();
+        },
+    }
+});
+
+
+export const BarIntersectionReferences = trait<FooType & Trait<typeof BarLiteral>>({
     defaultstaticFoo() {
         this.CONSTANT;
         this.defaultstaticFoo();
         this.reqStaticFoo();
-        this.barDefaultIntersection();
-        this.barIntersection();
+        this.BarDefaultLiteral();
+        this.BarLiteral();
     },
-    barDefaultIntersection() {
-
-    },
+    BarDefaultLiteral() { },
     [instance]: {
         defaultInstanceFoo() {
 
@@ -34,15 +70,17 @@ export const BarIntersection = trait<FooType & { barIntersection(): void; barDef
     }
 });
 
-export const BarLiteralDerive = trait<Derive<[FooType], { barDerive(): void; barDefaultDerive?(): void }>>({
-    defaultstaticFoo() {
+export const BarLiteralDerive = trait<[FooType, { barDerive(): void; barDefaultDerive?(): void }]>({
+    // defaultstaticFoo() {
+    // },
+    barDefaultDerive() {
         this.CONSTANT;
         this.defaultstaticFoo();
         this.reqStaticFoo();
         this.barDefaultDerive();
         this.barDerive();
+
     },
-    barDefaultDerive() { },
     [instance]: {
         defaultInstanceFoo() {
 
@@ -54,23 +92,26 @@ type FooBarBaz<Self extends object = object> = {
     staticRequiredFooBarBaz(): void;
 };
 
-export const FooBarBaz = trait<Derive<[FooType, Bar], FooBarBaz>>({
-    defaultstaticFoo() { },
+
+export const FooBarBaz = trait<[FooType, Bar, FooBarBaz]>({
     [instance]: {
-        defaultInstanceFoo() { },
+        defaultInstanceFoo() {
+            this.defaultInstanceFoo();
+            this.reqInstanceBar();
+            this.reqInstanceFoo();
+        },
     }
 });
 
 export type BarReferenceDeriveType = { barDerive(): void; barDefaultDerive?(): void };
-export const BarReferenceDerive = trait<Derive<[FooType], BarReferenceDeriveType>>({
-    defaultstaticFoo() {
+export const BarReferenceDerive = trait<[FooType, BarReferenceDeriveType]>({
+    barDefaultDerive() {
         this.CONSTANT;
-        this.defaultstaticFoo();
         this.reqStaticFoo();
-        this.barDefaultDerive();
         this.barDerive();
+        this.barDefaultDerive();
+        this.defaultstaticFoo();
     },
-    barDefaultDerive() { },
 
     [instance]: {
         defaultInstanceFoo() {

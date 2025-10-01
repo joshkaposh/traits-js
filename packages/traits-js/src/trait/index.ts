@@ -1,5 +1,5 @@
-export type * from './types';
-export * from './modifier';
-export * from './define';
-export * from './derive'
-export * from './derive-old';
+export type { Trait, Derive, TraitClass } from './types';
+export { instance } from './modifier';
+
+export { trait } from './define';
+export { derive } from './derive';

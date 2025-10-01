@@ -9,37 +9,18 @@ export type FooBar = {
 
 export const FooBar = trait<FooBar>({});
 
-export type Baz = {
+export const Baz = trait<[Foo, FooBar, {
     CONSTANT_BAZ: number;
     baz(): void;
     defaultBaz?(): void;
     [instance]: {
         instanceBaz(): void;
     };
-};
-
-export const Baz = trait<Foo & FooBar & Baz>({
-    defaultstaticFoo() { },
+}]>({
     defaultBaz() {
         this.CONSTANT;
         this.CONSTANT_BAZ;
         this.defaultBaz();
-        this.reqStaticFoo();
-        this.defaultBaz();
-        this.baz();
-    },
-    [instance]: {
-        defaultInstanceFoo() { },
-    }
-});
-
-
-export const BazDerive = trait<Derive<[Foo, FooBar], Baz>>({
-    defaultstaticFoo() { },
-    defaultBaz() {
-        this.CONSTANT;
-        this.CONSTANT_BAZ;
-        this.defaultstaticFoo();
         this.reqStaticFoo();
         this.defaultBaz();
         this.baz();

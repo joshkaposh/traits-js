@@ -1,5 +1,5 @@
-import type { Span } from "oxc-parser";
-import type { FlagsInterface } from "./flags";
+import type { Span, TSTupleElement } from "oxc-parser";
+import { Flags, type DerivedFlags, type FlagsInterface } from "./flags";
 
 export type UnknownStatic = Span[]
 export type UnknownInstance = Array<{
@@ -9,30 +9,29 @@ export type UnknownInstance = Array<{
 }>;
 
 export class TraitDefinition {
-    #flags: FlagsInterface;
+    #joined: FlagsInterface;
+    #base: FlagsInterface;
+    #uninitDerives: TSTupleElement[];
     #name: string;
     #start: number;
     #end: number;
 
-    #unknownStatic: UnknownStatic;
-    #unknownInstance: UnknownInstance;
     #errored: boolean;
 
     constructor(
         name: string,
         start: number,
         end: number,
-        flags: FlagsInterface,
-        unknownStatic: UnknownStatic,
-        unknownInstance: UnknownInstance
+        valid: boolean,
+        flags: { base: FlagsInterface; derives: TSTupleElement[] },
     ) {
-        this.#flags = flags;
+        this.#base = flags.base;
+        this.#joined = flags.base.clone();
+        this.#uninitDerives = flags.derives;
         this.#name = name;
         this.#start = start;
         this.#end = end;
-        this.#unknownStatic = unknownStatic;
-        this.#unknownInstance = unknownInstance;
-        this.#errored = unknownStatic.length + unknownInstance.length !== 0;
+        this.#errored = !valid;
     }
 
     get errored() {
@@ -51,8 +50,23 @@ export class TraitDefinition {
         return this.#end;
     }
 
-    get flags() {
-        return this.#flags;
+    get baseFlags() {
+        return this.#base;
     }
 
+    get flags() {
+        return this.#joined;
+    }
+
+    get uninitializedDerives() {
+        return this.#uninitDerives;
+    }
+
+    join(derives: DerivedFlags) {
+        this.#joined = Flags.withDerives(this.#base, derives);
+    }
+
+    invalidate() {
+        this.#errored = true;
+    }
 }

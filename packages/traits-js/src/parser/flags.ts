@@ -1,4 +1,4 @@
-import type { TSSignature } from "oxc-parser";
+import type { Class, TSSignature } from "oxc-parser";
 import type { TraitDefinition } from "./definition";
 
 export const CONST = 0x00001;
@@ -92,8 +92,10 @@ export interface FlagsInterface {
 
     readonly names: readonly string[];
     readonly nameSet: Readonly<Set<string>>;
+    readonly staticNames: Readonly<Set<string>>;
     readonly staticDefaultNames: Readonly<Set<string>>;
     readonly staticRequiredNames: Readonly<Set<string>>;
+    readonly instanceNames: Readonly<Set<string>>;
     readonly instanceDefaultNames: Readonly<Set<string>>;
     readonly instanceRequiredNames: Readonly<Set<string>>;
 
@@ -116,13 +118,17 @@ export interface FlagsInterface {
 
     entries(): FlagsIterator;
 
+    clone(): FlagsInterface;
+
     [Symbol.iterator](): FlagsIterator;
 }
 
 export class Flags implements FlagsInterface {
     #names: readonly string[];
+    #static: Readonly<Set<string>>;
     #staticRequired: Readonly<Set<string>>;
     #staticDefault: Readonly<Set<string>>;
+    #instance: Readonly<Set<string>>;
     #instanceRequired: Readonly<Set<string>>;
     #instanceDefault: Readonly<Set<string>>;
 
@@ -137,8 +143,10 @@ export class Flags implements FlagsInterface {
         byName: Record<string, number>,
     ) {
 
+        const statics = new Set<string>()
         const sr = new Set<string>(),
             sd = new Set<string>(),
+            instances = new Set<string>(),
             ir = new Set<string>(),
             id = new Set<string>();
 
@@ -146,12 +154,14 @@ export class Flags implements FlagsInterface {
             const f = flags[index]!;
             const n = names[index]!;
             if (f & STATIC) {
+                statics.add(n);
                 if (f & REQUIRED) {
                     sr.add(n)
                 } else {
                     sd.add(n)
                 }
             } else {
+                instances.add(n);
                 if (f & REQUIRED) {
                     ir.add(n)
                 } else {
@@ -165,11 +175,17 @@ export class Flags implements FlagsInterface {
         this.#flags = flags;
         this.#byName = byName;
         this.#nameSet = new Set(names);
+        this.#static = statics;
         this.#staticRequired = sr;
         this.#staticDefault = sd;
+        this.#instance = instances;
         this.#instanceRequired = ir;
         this.#instanceDefault = id;
         this.#len = names.length;
+    }
+
+    clone() {
+        return new Flags(this.#names, this.#flags, this.#byName);
     }
 
     static from(names: string[], flags: number[]) {
@@ -247,6 +263,10 @@ export class Flags implements FlagsInterface {
         return this.#nameSet;
     }
 
+    get staticNames() {
+        return this.#static;
+    }
+
     get staticDefaultNames() {
         return this.#staticDefault;
     }
@@ -254,6 +274,11 @@ export class Flags implements FlagsInterface {
     get staticRequiredNames() {
         return this.#staticRequired;
 
+    }
+
+
+    get instanceNames() {
+        return this.#instance;
     }
 
     get instanceDefaultNames() {
@@ -284,13 +309,39 @@ export class Flags implements FlagsInterface {
     }
 
     isDisjointFrom(other: FlagsInterface) {
-        return this.#nameSet.isDisjointFrom(other.nameSet);
+        return this.#static.isDisjointFrom(other.staticDefaultNames) && this.#instance.isDisjointFrom(other.instanceDefaultNames);
     }
 
     isDisjointFromDerives(derives: FlagsInterface[]) {
-        return derives.every(d => this.#nameSet.isDisjointFrom(d.nameSet))
+        const staticNames = this.#static,
+            instanceNames = this.#instance;
+
+        for (let i = 0; i < derives.length; i++) {
+            const current = derives[i]!;
+            const currentStaticNames = current.staticNames,
+                currentInstanceNames = current.instanceNames;
+
+            if (!currentStaticNames.isDisjointFrom(staticNames) || !currentInstanceNames.isDisjointFrom(instanceNames)) {
+                return false;
+            }
+
+            for (let j = 0; j < derives.length; j++) {
+                if (i === j) {
+                    continue
+                }
+                const other = derives[j]!;
+
+                if (!currentStaticNames.isDisjointFrom(other.staticNames) || !currentInstanceNames.isDisjointFrom(other.instanceNames)) {
+                    return false;
+                }
+            }
+
+        }
+
+        return true;
     }
 
+    // isDisjointFromClass(class: Class) {}
 
     get(name: string): number | undefined {
         return this.#byName[name];
@@ -341,16 +392,16 @@ export class Flags implements FlagsInterface {
 
 export type ParsedDerives = ({ implicit: true; type: FlagsInterface } | { implicit: false; type: TraitDefinition })[]
 
-export type DerivedFlags = Array<{ name: string | undefined; flags: FlagsInterface }>;
+export type DerivedFlags = Array<{ name: string; flags: FlagsInterface }>;
 
 class FlagsWithDerives implements FlagsInterface {
-    #flags: FlagsInterface;
+    #baseFlags: FlagsInterface;
     #joined: FlagsInterface;
-    #namedDerives: Record<string, FlagsInterface>;
-    constructor(named: Record<string, FlagsInterface>, base: FlagsInterface, joined: FlagsInterface) {
-        this.#flags = base;
+    #derives: Record<string, FlagsInterface>;
+    constructor(base: FlagsInterface, joined: FlagsInterface, derives: Record<string, FlagsInterface>) {
+        this.#baseFlags = base;
         this.#joined = joined;
-        this.#namedDerives = named;
+        this.#derives = derives;
     }
 
     static fromDerives(base: FlagsInterface, derives: DerivedFlags) {
@@ -362,9 +413,7 @@ class FlagsWithDerives implements FlagsInterface {
         for (let i = 0; i < derives.length; i++) {
             const { name, flags } = derives[i]!;
 
-            if (name) {
-                named[name] = flags;
-            }
+            named[name] = flags;
 
             const names = flags.names;
             const flagsFlags = flags.flags;
@@ -385,13 +434,13 @@ class FlagsWithDerives implements FlagsInterface {
 
 
         return new FlagsWithDerives(
-            named,
             base,
             new Flags(
                 derivedNames,
                 derivedFlags,
                 byName
             ),
+            named,
         );
     }
 
@@ -403,6 +452,10 @@ class FlagsWithDerives implements FlagsInterface {
         return this.#joined.nameSet;
     }
 
+    get staticNames() {
+        return this.#joined.staticNames;
+    }
+
     get staticDefaultNames() {
         return this.#joined.staticDefaultNames;
     }
@@ -410,6 +463,10 @@ class FlagsWithDerives implements FlagsInterface {
     get staticRequiredNames() {
         return this.#joined.staticRequiredNames;
 
+    }
+
+    get instanceNames() {
+        return this.#joined.instanceNames;
     }
 
     get instanceDefaultNames() {
@@ -426,28 +483,31 @@ class FlagsWithDerives implements FlagsInterface {
     }
 
     get baseNames() {
-        return this.#flags.names;
+        return this.#baseFlags.names;
     }
 
     get baseNameSet() {
-        return this.#flags.nameSet;
+        return this.#baseFlags.nameSet;
     }
 
-    // get derivedNames() {
-    //     // return this.#de
-    // }
+    clone(): FlagsInterface {
+        return new FlagsWithDerives(
+            this.#baseFlags.clone(),
+            this.#joined.clone(),
+            Object.fromEntries(Object.entries(this.#derives).map(([k, v]) => [k, v.clone()])),
+        )
+    }
 
     derivedNamesFor(name: string) {
-        return this.#namedDerives[name]?.flags;
+        return this.#derives[name]?.flags;
     }
 
     derivedFlagsFor(name: string) {
-        return this.#namedDerives[name]?.flags;
+        return this.#derives[name]?.flags;
     }
 
     intoImmutable(): FlagsInterface {
-        return void 0 as unknown as FlagsInterface;
-        // return new TraitFlagsWithDerivedFlags()
+        return this;
     }
 
     has(name: string, flag: number) {
