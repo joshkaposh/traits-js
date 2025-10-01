@@ -26,8 +26,7 @@ export const SayHello = trait<{
 })
 
 
-export type Foo = Trait<typeof Foo>;
-export const Foo = trait<{
+export type Foo = {
     CONSTANT: number;
     reqStaticFoo(): void;
     defaultstaticFoo?(): void;
@@ -36,7 +35,8 @@ export const Foo = trait<{
         defaultInstanceFoo?(): void;
         reqInstanceFoo(): void;
     };
-}>({
+};
+export const Foo = trait<Foo>({
     // [include]: {
     //     defaultstaticFoo: []
     // },

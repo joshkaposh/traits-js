@@ -1,12 +1,8 @@
 import { existsSync } from 'node:fs';
-import { basename, join, normalize } from 'node:path';
+import { basename, normalize, dirname } from 'node:path';
 import type { ResolverFactory } from "oxc-resolver";
 import type { ParseFileResult, ParseFileResultResult } from "./types";
 import { parseSync } from 'oxc-parser';
-
-export function tryResolveSync(resolver: ResolverFactory, directory: string, request: string) {
-    try { return resolver.sync(directory, request) } catch (error) { }
-}
 
 export function checkParseResult(result: ParseFileResult, path: string): asserts result is ParseFileResultResult {
     if (Array.isArray(result)) {
@@ -32,8 +28,7 @@ export async function resolve(
         let result!: ParseFileResultResult;
 
         if (stats.isDirectory()) {
-            const request = normalize(`${path}/${indexFileNameFilter}`);
-            const resolved = resolver.sync(path, request);
+            const resolved = resolver.sync(path, './');
             if (resolved.path) {
                 const absolutePath = resolved.path;
                 const file = Bun.file(absolutePath);
@@ -42,7 +37,7 @@ export async function resolve(
                 result = {
                     name: name,
                     packageJson: resolved.packageJsonPath,
-                    originalRequest: path,
+                    directory: path,
                     path: absolutePath,
                     originalCode: code,
                     result: parseSync(name, code, {
@@ -55,6 +50,7 @@ export async function resolve(
             }
 
         } else {
+
             const name = basename(path);
             const code = await file.text();
             const resolved = resolver.sync(path, './');
@@ -62,7 +58,7 @@ export async function resolve(
                 name: name,
                 path: path,
                 packageJson: resolved.packageJsonPath,
-                originalRequest: join(path, '../'),
+                directory: dirname(path),
                 originalCode: code,
                 result: parseSync(name, code, {
                     astType: 'ts',

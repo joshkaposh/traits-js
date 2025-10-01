@@ -16,26 +16,27 @@ export class TraitDefinition {
     #start: number;
     #end: number;
 
-    #errored: boolean;
+    #valid: boolean;
 
     constructor(
         name: string,
         start: number,
         end: number,
         valid: boolean,
-        flags: { base: FlagsInterface; derives: TSTupleElement[] },
+        flags?: { base: FlagsInterface; derives: TSTupleElement[] },
     ) {
+        flags ??= { base: new Flags([], [], {}), derives: [] };
         this.#base = flags.base;
         this.#joined = flags.base.clone();
         this.#uninitDerives = flags.derives;
         this.#name = name;
         this.#start = start;
         this.#end = end;
-        this.#errored = !valid;
+        this.#valid = valid;
     }
 
-    get errored() {
-        return this.#errored;
+    get valid() {
+        return this.#valid;
     }
 
     get name() {
@@ -67,6 +68,6 @@ export class TraitDefinition {
     }
 
     invalidate() {
-        this.#errored = true;
+        this.#valid = false;
     }
 }
