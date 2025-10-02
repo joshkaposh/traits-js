@@ -1,7 +1,6 @@
 import type { Class, TSSignature } from "oxc-parser";
 import type { TraitDefinition } from "./definition";
 import { TraitError } from "./error";
-import type { TraitFile } from "./trait-file";
 
 // export type SerializedFlags = `${string}:${number}`;
 
@@ -125,9 +124,7 @@ const CONSTANT_VALUE = {
     TSStringKeyword: 3,
 } as const;
 
-
-
-type NameSet = ReadonlySet<string>;
+export type NameSet = ReadonlySet<string>;
 
 export class Flags implements FlagsInterface {
 
@@ -193,7 +190,7 @@ export class Flags implements FlagsInterface {
         this.#instanceDefault = instanceDefaultNames!;
     }
 
-    static from(names: string[], flags: number[]) {
+    static from(names: string[] | readonly string[], flags: number[] | readonly number[]) {
         const byName: Record<string, number> = {};
         for (let i = 0; i < flags.length; i++) {
             byName[names[i]!] = flags[i]!;
@@ -223,6 +220,7 @@ export class Flags implements FlagsInterface {
             const signature = signatures[i]!;
 
             if (!('key' in signature)) {
+                errors.push(TraitError.IdentifierNeLiteral(signature, ''));
                 continue;
             }
 
@@ -254,8 +252,6 @@ export class Flags implements FlagsInterface {
                 } else {
                     // ! CONSTANT
                     if (signatureName !== signatureName.toUpperCase()) {
-                        console.log(signatureName);
-
                         errors.push(TraitError.ConstantNameNeUppercase(signatureName));
                         continue;
                     }
@@ -305,7 +301,6 @@ export class Flags implements FlagsInterface {
 
     }
 
-
     get instanceNames() {
         return this.#instance;
     }
@@ -332,6 +327,44 @@ export class Flags implements FlagsInterface {
             this.#instanceDefault,
             this.#instanceRequired
         );
+    }
+
+    static serialize(flags: FlagsInterface) {
+
+        if (flags instanceof FlagsWithDerives) {
+            const len = flags.names.length;
+            const lastDeriveIndex = len - flags.baseNames.length;
+            return {
+                type: 'WithDerives',
+                baseNames: flags.baseNames,
+                baseFlags: flags.baseFlags,
+                derivedNames: flags.names.slice(0, lastDeriveIndex),
+                derivedFlags: flags.flags.slice(0, lastDeriveIndex)
+            } as const
+        } else {
+            return {
+                type: 'Flags',
+                names: flags.names,
+                flags: flags.flags
+            } as const;
+        }
+    }
+
+    static deserialize(serialized: ReturnType<typeof Flags['serialize']>) {
+
+        if (serialized.type === 'Flags') {
+            return Flags.from(serialized.names, serialized.flags)
+        } else {
+            const { baseFlags, baseNames, derivedFlags, derivedNames } = serialized;
+            const base = Flags.from(baseNames, baseFlags);
+
+            // return new FlagsWithDerives(base, )
+        }
+        // const [names, flags] = serialized;
+        // for (let i = 0; i < names.length; i++) {
+        //     const element = names[i];
+
+        // }
     }
 
     isDisjointFrom(other: FlagsInterface) {
@@ -397,15 +430,19 @@ export type DerivedFlags = Array<{ name: string; flags: FlagsInterface }>;
 class FlagsWithDerives implements FlagsInterface {
     #baseFlags: FlagsInterface;
     #joined: FlagsInterface;
-    #derives: Record<string, FlagsInterface>;
-    constructor(base: FlagsInterface, joined: FlagsInterface, derives: Record<string, FlagsInterface>) {
+    #derives: [string, FlagsInterface][];
+    #derivesByName: Record<string, FlagsInterface>;
+
+    constructor(base: FlagsInterface, joined: FlagsInterface, derives: [string, FlagsInterface][], derivesByName: Record<string, FlagsInterface>) {
         this.#baseFlags = base;
         this.#joined = joined;
         this.#derives = derives;
+        this.#derivesByName = derivesByName;
     }
 
     static fromDerives(base: FlagsInterface, derives: DerivedFlags) {
         const derivesByName: Record<string, FlagsInterface> = Object.create(null);
+        const derivedNamesFlags: [name: string, flags: FlagsInterface][] = [];
         const byName: Record<string, number> = Object.create(null);
         const joinedNames = [];
         const joinedFlags = [];
@@ -416,6 +453,7 @@ class FlagsWithDerives implements FlagsInterface {
 
             const names = flags.names;
             const flagsFlags = flags.flags;
+            derivedNamesFlags.push([names[i]!, flags]);
 
             for (let j = 0; j < names.length; j++) {
                 const n = names[j]!;
@@ -429,6 +467,7 @@ class FlagsWithDerives implements FlagsInterface {
         joinedNames.push(...base.names);
         joinedFlags.push(...base.flags);
 
+
         return new FlagsWithDerives(
             base,
             new Flags(
@@ -436,6 +475,7 @@ class FlagsWithDerives implements FlagsInterface {
                 joinedFlags,
                 byName
             ),
+            derivedNamesFlags,
             derivesByName,
         );
     }
@@ -485,21 +525,20 @@ class FlagsWithDerives implements FlagsInterface {
         return this.#baseFlags.nameSet;
     }
 
+    get baseFlags() {
+        return this.#baseFlags.flags;
+    }
+
     clone(): FlagsInterface {
+        const derives = this.#derives.map((e) => [e[0], e[1].clone()] as [string, FlagsInterface]);
+        const derivesByName = Object.fromEntries(derives.map((e) => [e[0], e[1].clone()] as [string, FlagsInterface]));
         return new FlagsWithDerives(
             this.#baseFlags.clone(),
             this.#joined.clone(),
-            Object.fromEntries(Object.entries(this.#derives).map(([k, v]) => [k, v.clone()])),
+            derives,
+            derivesByName
         )
     }
-
-    // derivedNamesFor(name: string) {
-    //     return this.#derives[name]?.flags;
-    // }
-
-    // derivedFlagsFor(name: string) {
-    //     return this.#derives[name]?.flags;
-    // }
 
 
     isDisjointFrom(other: FlagsInterface) {

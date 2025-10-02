@@ -1,8 +1,6 @@
 import { instance, trait, type Trait, derive, type Derive } from 'traits-js';
 import { include } from 'traits-js/modifier';
 
-
-
 export type SayHello = Trait<typeof SayHello>;
 export const SayHello = trait<{
     [instance]: {

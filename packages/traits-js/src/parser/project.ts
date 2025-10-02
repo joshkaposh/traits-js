@@ -1,7 +1,7 @@
-import type { ExportNamedDeclaration, TSTupleElement, TSTypeLiteral, TSTypeReference } from "oxc-parser";
+import type { ExportNamedDeclaration, TSTypeLiteral, TSTypeReference } from "oxc-parser";
 import { ResolverFactory, type NapiResolveOptions } from "oxc-resolver";
 import { existsSync } from 'node:fs';
-import { dirname, join, normalize } from 'node:path';
+import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { checkParseResult, resolve } from "./resolver";
 import { declarationName, isDeclaredInModule, type TraitDeclaration, type TraitAliasDeclaration } from "./node";
@@ -14,7 +14,6 @@ import { walk } from "oxc-walker";
 import { print } from "./helpers";
 import { Stack } from "./stack";
 import { TraitError } from "./error";
-import { createTypeReferenceDirectiveResolutionCache } from "typescript";
 
 
 type ExportedTraitDeclaration = {
@@ -35,18 +34,10 @@ type TraitTypeExports = Record<string, TraitAliasDeclaration>;
 
 type ResolvedRef = TraitDefinition | { name: string; flags: FlagsInterface };
 
-type ResolvedDerives = {
-    type: ResolvedRef;
-    derives: ResolvedRef[];
-    flags: FlagsInterface[];
-};
-
-type UnresolvedDerivesOfTrait = (TSTypeLiteral | TSTypeReference)[];
-
 let VERBOSE = false;
 
 const TRAIT_FN_NAME = 'trait';
-const TRAIT_TYPE_NAME = 'Trait';
+// const TRAIT_TYPE_NAME = 'Trait';
 
 export class Project {
     #cwd: string;
@@ -192,12 +183,12 @@ export class Project {
 
                 const definition_errors: TraitError[] = [];
 
-                // if (args.length !== 1) {
-                //     definition_errors.push(TraitError.InvalidTraitCallArguments());
-                //     errors[varName] = definition_errors;
-                //     traits[varName] = new TraitDefinition(varName, start, end, false)
-                //     continue;
-                // }
+                if (args.length !== 1) {
+                    definition_errors.push(TraitError.InvalidTraitCallArguments());
+                    errors[varName] = definition_errors;
+                    traits[varName] = new TraitDefinition(varName, start, end, false)
+                    continue;
+                }
 
                 // !PARSE
                 const base = file.parseBase(file, call_expr.typeArguments.params, types[varName]);

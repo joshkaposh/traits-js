@@ -1,4 +1,4 @@
-import type { ClassFromTraits, Derive, DeriveFn, ImplFn, InferTypes, TraitRecord } from "./types";
+import type { ClassFromTraits, Derive, DeriveFn, ImplFn, InferTypes, TraitRecord } from "../types";
 
 
 export function derive<const Derives extends (TraitRecord | DeriveFn | ImplFn)[]>(impl: Derive<Derives>): ClassFromTraits<InferTypes<Derives>> {

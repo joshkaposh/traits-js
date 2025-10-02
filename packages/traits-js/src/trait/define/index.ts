@@ -1,5 +1,30 @@
-import type { Derive, ImplFn, MergeProps, TraitImplementation, TraitRecord, ValidClass } from "./types";
+import type { Derive, DeriveFn, ImplFn, MergeProps, TraitImplementation, TraitImplementation2, TraitRecord, ValidClass } from "../types";
 // TODO: add list of advanced usage examples... after I implement them (Traits deriving other Traits, generic Traits)
+
+type NormalizeDerives<D extends TraitRecord[], Base extends TraitRecord> = Derive<D, Base>
+
+type NormalizeTypeParams<T> = T extends [...infer D extends TraitRecord[], infer Base extends TraitRecord] ? Derive<D, Base> : T extends TraitRecord ? T : never;
+
+// N extends TraitRecord = Normalized extends TraitRecord ? Normalized : never;
+
+
+type GetBase<T> =
+    T extends TraitRecord ? T :
+    T extends [infer B extends TraitRecord] ? B :
+    T extends [...any[], infer B extends TraitRecord] ? B :
+    never;
+
+type GetDerives<T> =
+    T extends TraitRecord ? [] :
+    T extends [TraitRecord] ? [] :
+    T extends [...infer D extends TraitRecord[], TraitRecord] ? D :
+    never;
+
+// type AssertTraitRecord<T> = T extends TraitRecord ? T : never;
+
+// const Derives extends 
+
+
 /**
  * # Usage
  * 
@@ -63,9 +88,37 @@ import type { Derive, ImplFn, MergeProps, TraitImplementation, TraitRecord, Vali
  * - _any_ default method(s) __must__ be implemented by trait `T`
  * - _any_ default method(s) overridden in a deriving type `D`  __must have the same type signature__ as defined in `T`
  */
-export function trait<const T extends TraitRecord | TraitRecord[], Normalized = T extends [...infer D extends TraitRecord[], infer Base extends TraitRecord] ? Derive<D, Base> : T, N extends TraitRecord = Normalized extends TraitRecord ? Normalized : never, Self = T extends any[] ? MergeProps<T> : T>(type: TraitImplementation<N, Self>): ImplFn<N> {
+export function trait<
+    const T extends TraitRecord | TraitRecord[],
+    const B extends TraitRecord = GetBase<T>,
+    const D extends TraitRecord[] = GetDerives<T>
+>(type: TraitImplementation<B, D>): ImplFn<B, D> {
     // @ts-ignore
     return <D extends T>(impl: D) => {
         return <C extends ValidClass>(target: C) => target as any;
     }
 };
+
+// type MergeDerives<T extends TraitRecord[]> = any;
+
+// function define<const T extends TraitRecord>(type: TraitImplementation2<T>): DeriveFn<T> {
+//     // @ts-ignore
+//     return (impl: T) => {
+//         return <C extends ValidClass>(target: C) => target as any;
+//     }
+// };
+
+
+// type MergeDerives<Ttype extends any[], Props = {}> = Ttype extends [infer Tcurrent extends TraitRecord, ...infer Trest extends Array<any>] ? MergeProps<Trest, Props & Tcurrent> : Props;
+
+// declare function defineWithDerives<
+//     const T extends TraitRecord[]
+// >(defaultMethods: TraitImplementation2): void;
+
+// const Foo = define<{ foo?(): void; rFoo(): void }>({
+//     foo() { }
+// });
+
+// const Bar = define<{ bar?(): void }>({
+//     bar() { }
+// });

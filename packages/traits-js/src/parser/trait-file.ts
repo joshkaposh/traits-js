@@ -1,15 +1,15 @@
-import type { Node, ObjectPropertyKind, TSTupleElement, TSTypeAliasDeclaration } from "oxc-parser";
+import type { Node, Span, TSTupleElement, TSTypeAliasDeclaration, ObjectPropertyKind } from "oxc-parser";
 import type { ResolverFactory } from "oxc-resolver";
-import { typeDeclarationSignatures, type TraitAliasDeclaration, type TypeArguments } from "./node";
+import { typeDeclarationSignatures, type TraitAliasDeclaration, type TraitObjectProperty, type TypeArguments } from "./node";
 import { TraitError } from "./error";
-import { Flags, type FlagsInterface } from "./flags";
+import { Flags, type FlagsInterface, type NameSet } from "./flags";
 import type { ParseFileResultResult } from "./types";
 import { TraitDefinition } from "./definition";
 import type { Stack } from "./stack";
 import { Registry, type FileRegistry, type ReExportRegistry } from "./registry";
 import { checkParseResult, resolve } from "./resolver";
 import type { Project } from "./project";
-import type { DefaultMethods } from "./default-methods";
+import { DefaultMethods } from "./default-methods";
 
 export type TraitTypeExports = Record<string, TraitAliasDeclaration>;
 export type RegisterReExportsFn = (types: ReExportRegistry, vars: ReExportRegistry) => Promise<void>;
@@ -181,13 +181,13 @@ export class TraitFile {
 
     }
 
-    importVar(name: string) {
-        return this.#registry.type === 'file' ? this.#registry.importVars[name] : void 0;
-    }
+    // importVar(name: string) {
+    //     return this.#registry.type === 'file' ? this.#registry.importVars[name] : void 0;
+    // }
 
-    importType(name: string) {
-        return this.#registry.type === 'file' ? this.#registry.importTypes[name] : void 0;
-    }
+    // importType(name: string) {
+    //     return this.#registry.type === 'file' ? this.#registry.importTypes[name] : void 0;
+    // }
 
     parseBase(self: TraitFile, typeArguments: TypeArguments['params'], typeDeclaration: TSTypeAliasDeclaration | undefined): { base: FlagsInterface; derives: TSTupleElement[] } | TraitError[] {
         if (!typeArguments.length) {
@@ -327,208 +327,130 @@ export class TraitFile {
         }
     }
 
-    // #parseInstanceProperties(
-    //     defaultMethods: DefaultMethods,
-    //     properties: ObjectPropertyKind[],
-    //     defaultInstance: Set<string>,
-    //     requiredInstance: Set<string>,
-    //     unknownInstance: { type: string; start: number; end: number, name?: string }[],
-    //     err_requiredInstanceNames: string[]
-    // ) {
-    //     for (let i = 0; i < properties.length; i++) {
-    //         const instanceProperty = properties[i]!;
-    //         if (instanceProperty.type === 'SpreadElement') {
-    //             unknownInstance.push({ type: 'SpreadAssigment', start: instanceProperty.start, end: instanceProperty.end });
-    //             continue;
-    //         }
+    #parseInstanceProperties(
+        defaultMethods: DefaultMethods,
+        properties: ObjectPropertyKind[],
+        defaultInstance: NameSet,
+        requiredInstance: NameSet,
+        unknownInstance: { type: string; start: number; end: number, name?: string }[],
+        err_requiredInstanceNames: string[]
+    ) {
+        for (let i = 0; i < properties.length; i++) {
+            const instanceProperty = properties[i]!;
+            if (instanceProperty.type === 'SpreadElement') {
+                unknownInstance.push({ type: 'SpreadAssigment', start: instanceProperty.start, end: instanceProperty.end });
+                continue;
+            }
 
-    //         const key = instanceProperty.key;
-    //         if (key.type !== 'Identifier') {
-    //             unknownInstance.push({
-    //                 type: 'KeyNeIdentifier',
-    //                 start: instanceProperty.key.start,
-    //                 end: instanceProperty.key.end,
-    //             });
-    //             continue;
-    //         }
+            const key = instanceProperty.key;
+            if (key.type !== 'Identifier') {
+                unknownInstance.push({
+                    type: 'KeyNeIdentifier',
+                    start: instanceProperty.key.start,
+                    end: instanceProperty.key.end,
+                });
+                continue;
+            }
 
-    //         if (requiredInstance.has(key.name)) {
-    //             err_requiredInstanceNames.push(key.name);
-    //         } else if (defaultInstance.has(key.name)) {
-    //             defaultMethods.add(key.name, instanceProperty.start, instanceProperty.end);
-    //         } else {
-    //             unknownInstance.push({ type: 'NotRegisteredInTrait', start: instanceProperty.start, end: instanceProperty.end, name: key.name });
-    //         }
-    //     }
-    // }
+            if (requiredInstance.has(key.name)) {
+                err_requiredInstanceNames.push(key.name);
+            } else if (defaultInstance.has(key.name)) {
+                defaultMethods.add(key.name, instanceProperty.start, instanceProperty.end);
+            } else {
+                unknownInstance.push({ type: 'NotRegisteredInTrait', start: instanceProperty.start, end: instanceProperty.end, name: key.name });
+            }
+        }
+    }
 
+    checkTraitObjectExpression(flags: FlagsInterface, properties: TraitObjectProperty[]) {
 
+        const defaultMethods = new DefaultMethods();
+        const defaultStatic = flags.staticDefaultNames;
+        const defaultInstance = flags.instanceDefaultNames;
+        const requiredStatic = flags.staticRequiredNames;
+        const requiredInstance = flags.instanceRequiredNames;
 
+        const unknownStatic: Span[] = [];
+        const unknownInstance: Array<{
+            type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
+            start: number;
+            end: number
+        }> = [];
 
-    // initializeTraitBaseFlags() {
-    //     // if (this.name.endsWith('.ts')) {
-    //     //     print('parse:file', `${this.name}`);
+        const err_requiredStaticNames: string[] = [];
+        const err_requiredInstanceNames: string[] = [];
 
-    //     // }
+        for (let i = 0; i < properties.length; i++) {
+            const property = properties[i]!;
+            const propertyName = property.key.name;
 
-    //     // const self = this,
-    //     //     types = self.#types,
-    //     //     traits = self.#traits,
-    //     //     bar = '-'.repeat(32);
+            if (property.value.type === 'FunctionExpression') {
+                if (requiredStatic.has(propertyName)) {
+                    err_requiredStaticNames.push(propertyName);
+                    continue
+                }
 
-    //     // if (VERBOSE) {
-    //     //     print('Initialize', self.path);
-    //     // }
+                if (defaultStatic.has(propertyName)) {
+                    defaultMethods.add(propertyName, property.start, property.end);
+                }
 
-    //     // const errors: Record<string, TraitError[]> = {};
+            } else if (propertyName === 'instance' && property.value.type === 'ObjectExpression') {
+                const instanceProperties = property.value.properties;
+                this.#parseInstanceProperties(defaultMethods, instanceProperties, defaultInstance, requiredInstance, unknownInstance, err_requiredInstanceNames);
+            } else {
+                unknownStatic.push({
+                    start: property.key.start,
+                    end: property.key.end
+                })
+            }
+        }
 
-    //     // for (const name in traits) {
-    //         // print('parse:trait', `${name}`);
-    //         // const { base: baseType, derives, start, end } = uninitialized[name]!;
+        // ! Parse ObjectExpression
 
-    //         // const definition_errors: TraitError[] = [];
-
-
-    //         // TODO: add this part to `walk` in `project::Project`
-    //         // const node = uninit.trait.node;
-    //         // const parent = uninit.trait.parent;
-    //         // const typeDeclaration = uninit.typeDeclaration;
-    //         // const declarator = node.declarations[0];
-    //         // const start = parent.start;
-    //         // const end = parent.end;
-
-    //         // TODO: use importName of "trait" instead of hard-coded here
-    //         // if (declarator.init.type === 'CallExpression' && declarator.init.callee.name === 'trait') {
-    //         //     const call_expr = declarator.init;
-    //         //     const args = call_expr.arguments;
-
-    //         //     if (args.length !== 1) {
-    //         //         definition_errors.push(TraitError.InvalidTraitCallArguments());
-    //         //         errors[name] = definition_errors;
-    //         //         continue;
-    //         //     }
-
-    //         // !PARSE
-    //         // const base = self.parseBase(self, call_expr.typeArguments.params, typeDeclaration);
-
-    //         // if (Array.isArray(base)) {
-    //         //     definition_errors.push(...base);
-    //         //     continue;
-    //         // }
-
-    //         // !PARSE
+        // console.log(`validated(${name})`);
 
 
-    //         // ! Create DerivedFlags
-    //         // const parsedFlags = self.#parseTraitTypeArgument(project, self, declarator.id.name, types, call_expr.typeArguments.params[0], typeDeclaration);
-    //         // if (Array.isArray(parsedFlags)) {
-    //         //     // console.log(parsedFlags.map(f => format('', f.message, '    ', `(${f.name}) - `)).join('\n'));
-    //         //     definition_errors.push(...parsedFlags);
-    //         //     errors[name] = definition_errors;
-    //         //     continue
-    //         // }
+        // if (!unknownStatic.length && !unknownInstance.length) {
+        // print('valid', 'true', 4);
+        // let str = `validated(${name})\n`;
+        // str += `    constants: [ ${flags.namesOfType(CONST).join(', ')} ]\n`;
+        // str += `    static: [ ${flags.namesOfType(STATIC).join(', ')} ]\n`;
+        // str += `    instance: [ ${flags.namesOfType(INSTANCE).join(', ')} ]\n`;
+        // str += `    default: [ ${flags.namesOfType(DEFAULT).join(', ')} ]\n`;
+        // str += `    required: [ ${flags.namesOfType(REQUIRED).join(', ')} ]\n`;
+        // console.log(str);
+        // } else {
 
-    //         // const flags = Flags.withDerives(parsedFlags.base, parsedFlags.derives);
-    //         // ! Create DerivedFlags
-    //         // ! Parse ObjectExpression
-    //         // const traitObject = call_expr.arguments[0];
-    //         // const properties = traitObject.properties;
+        //     const staticCount = unknownStatic.length;
+        //     const instanceCount = unknownInstance.length;
+        //     const errCount = staticCount + instanceCount;
 
-    //         // const defaultMethods = new DefaultMethods();
-    //         // const defaultStatic = flags.staticDefaultNames;
-    //         // const defaultInstance = flags.instanceDefaultNames;
-    //         // const requiredStatic = flags.staticRequiredNames;
-    //         // const requiredInstance = flags.instanceRequiredNames;
+        //     if (!VERBOSE) {
+        //         console.log(`%s has %s errors (%s static errors, %s instance errors)`, name, errCount, staticCount, instanceCount);
+        //     } else {
+        //         const code = self.#result.originalCode;
+        //         let str = `${name} has (${errCount}) errors...`;
+        //         str += `  with ${staticCount} static errors...`;
+        //         for (const { start, end } of unknownStatic) {
+        //             str += `\n    code: ${getCode(code, start, end)}`;
+        //         }
 
-    //         // const unknownStatic: Span[] = [];
-    //         // const unknownInstance: Array<{
-    //         //     type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
-    //         //     start: number;
-    //         //     end: number
-    //         // }> = [];
+        //         str += `  with ${instanceCount} instance errors...`;
+        //         for (const { start, end } of unknownInstance) {
+        //             str += `\n    type: ${node.type}: ${getCode(code, start, end)}`;
+        //         }
 
-    //         // const err_requiredStaticNames: string[] = [];
-    //         // const err_requiredInstanceNames: string[] = [];
-
-    //         // for (let i = 0; i < properties.length; i++) {
-    //         //     const property = properties[i]!;
-    //         //     const propertyName = property.key.name;
-
-    //         //     if (property.value.type === 'FunctionExpression') {
-    //         //         if (requiredStatic.has(propertyName)) {
-    //         //             err_requiredStaticNames.push(propertyName);
-    //         //             continue
-    //         //         }
-
-    //         //         if (defaultStatic.has(propertyName)) {
-    //         //             defaultMethods.add(propertyName, property.start, property.end);
-    //         //         }
-
-    //         //     } else if (propertyName === 'instance' && property.value.type === 'ObjectExpression') {
-    //         //         const instanceProperties = property.value.properties;
-    //         //         parseInstanceProperties(defaultMethods, instanceProperties, defaultInstance, requiredInstance, unknownInstance, err_requiredInstanceNames);
-    //         //     } else {
-    //         //         unknownStatic.push({
-    //         //             start: property.key.start,
-    //         //             end: property.key.end
-    //         //         })
-    //         //     }
-    //         // }
-
-    //         // ! Parse ObjectExpression
+        //         console.log(str);
 
 
-    //         // traits[name] = new TraitDefinition(
-    //         //     name,
-    //         //     start,
-    //         //     end,
-    //         //     base,
-    //         // );
+        //     }
+        //     // }
+        // }
 
-    //         // console.log(`validated(${name})`);
+        // }
 
-
-    //         // if (!unknownStatic.length && !unknownInstance.length) {
-    //         // print('valid', 'true', 4);
-    //         // let str = `validated(${name})\n`;
-    //         // str += `    constants: [ ${flags.namesOfType(CONST).join(', ')} ]\n`;
-    //         // str += `    static: [ ${flags.namesOfType(STATIC).join(', ')} ]\n`;
-    //         // str += `    instance: [ ${flags.namesOfType(INSTANCE).join(', ')} ]\n`;
-    //         // str += `    default: [ ${flags.namesOfType(DEFAULT).join(', ')} ]\n`;
-    //         // str += `    required: [ ${flags.namesOfType(REQUIRED).join(', ')} ]\n`;
-    //         // console.log(str);
-    //         // } else {
-
-    //         //     const staticCount = unknownStatic.length;
-    //         //     const instanceCount = unknownInstance.length;
-    //         //     const errCount = staticCount + instanceCount;
-
-    //         //     if (!VERBOSE) {
-    //         //         console.log(`%s has %s errors (%s static errors, %s instance errors)`, name, errCount, staticCount, instanceCount);
-    //         //     } else {
-    //         //         const code = self.#result.originalCode;
-    //         //         let str = `${name} has (${errCount}) errors...`;
-    //         //         str += `  with ${staticCount} static errors...`;
-    //         //         for (const { start, end } of unknownStatic) {
-    //         //             str += `\n    code: ${getCode(code, start, end)}`;
-    //         //         }
-
-    //         //         str += `  with ${instanceCount} instance errors...`;
-    //         //         for (const { start, end } of unknownInstance) {
-    //         //             str += `\n    type: ${node.type}: ${getCode(code, start, end)}`;
-    //         //         }
-
-    //         //         console.log(str);
-
-
-    //         //     }
-    //         //     // }
-    //         // }
-
-    //     // }
-
-    //     // }
-    // }
+        // }
+    }
 
 
     trait(name: string) {
@@ -563,8 +485,8 @@ export class TraitFile {
                         flags: flags
                     });
                 } else {
-                    const importVar = self.importVar(lookupName);
-                    const importType = self.importType(lookupName);
+                    const importVar = self.#registry.type === 'file' ? self.#registry.importVars[lookupName] : void 0;
+                    const importType = self.#registry.type === 'file' ? self.#registry.importTypes[lookupName] : void 0;
                     if (importVar) {
                         const actual = project.resolveReferenceFromRequest(project, self.directory, importVar, lookupName);
                         console.log('construct:importvar', actual?.name, actual?.valid);
