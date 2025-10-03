@@ -33,7 +33,7 @@ type GetBase<T> =
 // export type DeriveFn<T extends TraitRecord = {}, Derives extends TraitRecord[] = []> = <const C extends ValidClass>(target: C) => TraitClass<C, [...Derives, T]>;
 // export type ImplFn<T extends TraitRecord = {}, Derives extends TraitRecord[] = []> = ((implementation: T) => DeriveFn<T extends TraitRecord ? T : never, Derives extends TraitRecord[] ? Derives : []>);
 
-type Prettify<T> = { [K in keyof T]: T[K] } & {};
+// type Prettify<T> = { [K in keyof T]: T[K] } & {};
 
 /**
  * Extracts the "default keys" (names of default methods defined in `T`) from trait `T`.
@@ -131,12 +131,12 @@ type CheckKeys<T, K1, K2> = K1 extends K2 ? never : T;
 // }>;
 
 
-type CreateTrait<T = {}> = T extends any[] ? Trait<Last<T>, MergeDerives<NormalizeDerives<T>>> : Trait<T, {}>;
+type CreateTrait<T extends any = {}> = T extends any[] ? Trait<Last<T>, MergeDerives<NormalizeDerives<T>>> : Trait<T, {}>;
 
 type Intermediate<Type> =
-    Type extends TraitRecord ? Prettify<Trait<Type, []>> :
+    Type extends TraitRecord ? Trait<Type, []> :
     Type extends [TraitRecord] ? 'only one type in derive array, may as well use type instead' :
-    Type extends [...infer D extends any[], infer T extends TraitRecord] ? Prettify<Trait<T, D>> :
+    Type extends [...infer D extends any[], infer T extends TraitRecord] ? Trait<T, D> :
     never;
 
 type ResolveDerives<T extends Trait[], Resolved extends any[] = []> =
@@ -169,45 +169,78 @@ type MergeDerives<T> = T extends { derives: infer D extends any[] } ? UnionToInt
 type Last<A> = A extends [...any[], infer T] ? T : never;
 
 // TODO: Merge `C` with `T`
-type DeriveFn<T> = <C extends ValidClass>(derive: RequiredTraitMethods<T>) => void;
+type DeriveFn<Base extends any = any, Derives extends any = any> = <C extends ValidClass>(derive: RequiredTraitMethods<Base, Derives>) => C;
+
+type This<T> = ThisType<{
+    readonly [P in keyof T]-?: T[P] & {};
+}>;
+
+type DefaultMethodsFor<T> = PickDefaultMethods<T>;
+type RequiredMethodsFor<T, Derives> = PickRequiredMethods<Derives & T>;
+
+type DefaultTraitMethods<Base, Derives> = (
+    (Base extends { [instance]?: infer I } ?
+        I extends Record<PropertyKey, never> ? {} :
+        { [instance]: DefaultMethodsFor<I> & This<Omit<I & (Derives extends { [instance]: infer D } ? D : {}), symbol>> } :
+        {}) & DefaultMethodsFor<Base>
+) & This<Omit<Base & Derives, symbol>>
+
+type RequiredTraitMethods<Base, Derives> = (
+    (
+        Derives extends { [instance]: infer D } ?
+        {
+            [instance]: (RequiredMethodsFor<D, Base extends { [instance]: infer B } ? B : {}> &
+                Partial<D & Base extends { [instance]: infer B } ? B : {}>) & This<Omit<D & (Base extends { [instance]: infer I } ? I : {}), symbol>>
+        } :
+        Base extends { [instance]: infer I } ?
+        { [instance]: (RequiredMethodsFor<I, {}> & Partial<DefaultMethodsFor<I>>) & This<Omit<I, symbol>> } :
+        {}
+    ) & RequiredMethodsFor<Base, Derives>
+) & This<Omit<Base & Derives, symbol>>;
 
 function trait2<
     const T extends TraitRecord | TraitRecord[],
-    const Type = CreateTrait<T>
->(
-    defaultMethods?: DefaultTraitMethods<Type>
-): DeriveFn<Type> {
-    return () => { }
+    const Type extends { base: any; derives: any } = CreateTrait<T>
+>(implementation: DefaultTraitMethods<Type['base'], Type['derives']>): DeriveFn<Type['base'], Type['derives']> {
+    return void 0 as unknown as DeriveFn<Type['base'], Type['derives']>;
+
 };
 
-// declare function impl<T extends CreateTrait>(implementation: DefaultTraitMethods<T>): (derive: RequiredTraitMethods<T>) => void;
+function create<const T extends TraitRecord>(impl: DefaultTraitMethods<T, {}>): DeriveFn<T, {}> {
+    return void 0 as unknown as DeriveFn<T, {}>;
+};
+
+function compose<
+    const Derives extends TraitRecord[],
+    const Base extends TraitRecord,
+    const D = UnionToIntersection<Derives[number]>
+>(impl: DefaultTraitMethods<Base, D>): DeriveFn<Base, D> {
+    return void 0 as unknown as DeriveFn<Base, D>;
+}
+
+type GetTraitRecordsFromDerives<T extends any[], Merged = {}> = T extends [infer Current, ...infer Rest] ? GetTraitRecordsFromDerives<Rest, Merged & (
+    Current extends DeriveFn<infer Base, infer Derives> ?
+    Derives & Base :
+    Current extends TraitRecord ? Current :
+    {}
+)> : Merged;
 
 
-type This<T, K extends keyof T = keyof T> = ThisType<{
-    readonly [P in Exclude<K, symbol>]-?: T[P] & {};
-}>;
-
-type ThisHelper<Base, Derives> = This<Base & Derives>;
-
-type DefaultMethodsFor<T, Derives> = PickDefaultMethods<T> & ModifierRecord<T> & ThisHelper<T, Derives>;
-type RequiredMethodsFor<T, Derives> = PickRequiredMethods<T> & ModifierRecord<T> & ThisHelper<T, Derives>;
-
-
-type DefaultTraitMethods<T> = T extends { base: infer Base; derives: infer Derives } ? (
-    (Base extends { [instance]: infer I } ?
-        { [instance]: DefaultMethodsFor<I, Derives extends { [instance]: infer D } ? D : {}> } :
-        {})
-    & DefaultMethodsFor<Base, Derives>) : never;
+function createCompose<
+    const Base extends TraitRecord,
+    const DeriveTypes extends (DeriveFn | TraitRecord)[] = [],
+    const D = GetTraitRecordsFromDerives<DeriveTypes>
+>(impl: DefaultTraitMethods<Base, D>): DeriveFn<Base, D> {
+    return void 0 as unknown as DeriveFn<any, any>
+}
 
 
-type RequiredTraitMethods<T> = T extends { base: infer Base; derives: infer Derives } ? (
-    (Base extends { [instance]: infer I } ?
-        { [instance]: RequiredMethodsFor<I, Derives extends { [instance]: infer D } ? D : {}> } :
-        {})
-    & RequiredMethodsFor<Base, Derives>) : never;
+type TraitArgs<A> = A extends [...infer Derives extends DeriveFn<infer B, infer D>[], infer T extends TraitRecord] ? [...Derives, DefaultTraitMethods<T, D & B>] :
+    A extends [infer T extends TraitRecord] ? DefaultTraitMethods<T, {}> : never;
 
+type Records = GetTraitRecordsFromDerives<[typeof BarCompose]>;
 
-const FooDerive = trait2<FOO>({
+const FooCreateCompose = createCompose<FOO>({
     defFoo() {
         this
     },
@@ -218,6 +251,111 @@ const FooDerive = trait2<FOO>({
     }
 });
 
+
+const barCreateCompose = createCompose<BAR, [typeof FooCreateCompose]>({
+    barDef() {
+        this
+    }
+});
+
+
+const BazCreateCompose = compose<[FOO, BAR, BAR2], BAZ>({
+    bazDef() {
+        // this.bar<string>(class { })  
+    },
+});
+
+const BarCompose = compose<[FOO], BAR>({
+    barDef() {
+        this
+    },
+});
+
+const BazCompose = compose<[FOO], BAR>({
+    barDef() {
+        this
+    },
+});
+
+
+create<FOO>({
+    defFoo() {
+        this
+    },
+    // defFoo() {
+    //     this
+    // },
+    [instance]: {
+        defInstFoo() {
+            this
+        },
+    }
+    // defFoo() { },
+    // [instance]: {
+    //     defInstFoo() { },
+    // }
+});
+
+compose<[FOO], BAR>({
+    barDef() {
+        this
+    },
+})
+
+function impl<const Class extends ValidClass, const Trait>(type:
+    Trait extends DeriveFn<infer Base, infer Derives> ? RequiredTraitMethods<Base, Derives> :
+    never
+) {
+    return void 0 as unknown as Class;
+}
+
+const FooDerive = trait2<FOO>({
+    defFoo() {
+
+    },
+    [instance]: {
+        defInstFoo() {
+
+        },
+    }
+});
+
+// const BarDerive = trait2<[FOO, BAR]>({
+//     barDef() { }
+// });
+
+// const BarFinal = BarDerive({
+//     FOO: 1,
+//     foo1() {
+
+//     },
+//     foo2() {
+
+//     },
+//     bar() {
+//     },
+//     [instance]: {
+//         instFoo() {
+//             this
+//         }
+//     }
+
+// });
+
+const BarFinal2 = BarCompose({
+    FOO: 1,
+    foo1() {
+        this
+    },
+    foo2() { },
+    bar() { },
+    [instance]: {
+        instFoo() {
+            this
+        },
+    }
+})
+
 const FooFinal = FooDerive({
     FOO: 1,
     foo1() { },
@@ -225,7 +363,55 @@ const FooFinal = FooDerive({
     [instance]: {
         instFoo() { },
     }
+});
+
+impl<typeof SomeClass, typeof BarCompose>({
+    FOO: 1,
+    foo1() {
+
+    },
+    foo2() {
+
+    },
+    bar() {
+
+    },
+    [instance]: {
+        instFoo() {
+
+        },
+    }
 })
+
+const TypedClass = impl<typeof SomeClass, typeof FooDerive>({
+    FOO: 1,
+    foo1() {
+
+    },
+    foo2() {
+
+    },
+    [instance]: {
+        instFoo() {
+
+        },
+    }
+})
+
+class SomeClass {
+    static {
+        FooDerive({
+            FOO: 1,
+            foo1() { },
+            foo2() { },
+            [instance]: {
+                instFoo() { },
+            }
+        })
+    }
+}
+
+
 
 type FOO = {
     FOO: number;
@@ -238,9 +424,67 @@ type FOO = {
     }
 };
 
-type BAR = { bar(): void; barDef?(): void; };
-type BAR2 = { bar2(): void; bar2Def?(): void; };
+type BAR = {
+    bar<T extends string>(): void; barDef?(): void;
+    [instance]: {
+        //     barDefInst(): void;
+    };
+};
+type BAR2 = { bar<T extends number>(type: new () => any): void; bar2(): void; bar2Def?(): void; };
 type BAZ = { baz(): void; bazDef?(): void; };
+
+// P in K as Omit<T, P> extends T ? P : never
+
+// type HasDefaultKeys<T> = keyof RequiredKeysOf<T> extends DefaultKeysOf<T> ? -1 : 0;
+
+
+
+
+type PickInstanceIfHasDefaultKeys<T> = T extends { [instance]?: infer I } ?
+    keyof I extends (DefaultKeysOf<I> & string) ? I extends Record<PropertyKey, never> ? never : I : never : never;
+
+
+type Case1 = {
+    [instance]: {
+
+    }
+};
+
+
+type Case2 = {
+    [instance]?: {
+
+    }
+
+};
+
+type Case3 = {
+    [instance]: {
+        a(): void;
+    }
+
+};
+
+type Case4 = {
+    [instance]: {
+        a?(): void;
+    }
+};
+
+type Case5 = {
+    [instance]?: {
+        a?(): void;
+    }
+
+};
+
+type Test1 = PickInstanceIfHasDefaultKeys<Case1>;
+type Test2 = PickInstanceIfHasDefaultKeys<Case2>;
+type Test3 = PickInstanceIfHasDefaultKeys<Case3>;
+
+type Test4 = PickInstanceIfHasDefaultKeys<Case4>;
+type Test5 = PickInstanceIfHasDefaultKeys<Case5>;
+
 
 // const Foo = trait2<FOO>();
 // const Bar = trait2<[FOO, BAR]>();
