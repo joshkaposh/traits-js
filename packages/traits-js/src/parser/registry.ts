@@ -1,9 +1,6 @@
-import type { ImportNameKind, StaticExport, StaticExportEntry, StaticImport } from "oxc-parser";
-import { tryResolveSync } from "./resolver";
-import type { ResolverFactory } from "oxc-resolver";
-import type { Stack } from "./stack";
+import type { ImportNameKind, StaticExportEntry } from "oxc-parser";
 
-export type ModuleImport = {
+export type Import = {
     type: ImportNameKind;
     localToImport: Record<string, string | undefined>;
     moduleRequest: string;
@@ -17,12 +14,9 @@ export type ReExport = {
     entries: StaticExportEntry[];
 };;
 
-type R<T> = Record<string, T>;
-
-export type ImportRegistry = R<ModuleImport>;
-export type ReExportRegistry = R<ReExport>;
-export type LocalExportRegistry = R<LocalExport>;
-
+export type ImportRegistry = Record<string, Import>;
+export type ReExportRegistry = Record<string, ReExport>;
+export type LocalExportRegistry = Record<string, LocalExport>;
 
 type RegistryType = { [K in keyof typeof Registry]: ReturnType<typeof Registry[K]> };
 
@@ -30,9 +24,7 @@ export type Registry = RegistryType[keyof RegistryType];
 export type FileRegistry = RegistryType['File'];
 export type IndexRegistry = RegistryType['Index'];
 export const Registry = {
-    Index(stack: Stack, resolver: ResolverFactory, staticExports: StaticExport[]) {
-
-
+    Index() {
         //    for (const path in reExportTypes) {
         //             const resolveResult = tryResolveSync(resolver, originalRequest, path);
         //             const absolutePath = resolveResult?.path;
@@ -59,8 +51,6 @@ export const Registry = {
         //     };
 
 
-        const types: ReExportRegistry = {};
-        const vars: ReExportRegistry = {};
 
         // const registerReExports: registerReExportsFn = async (originalRequest: string) => {
         //     for (const path in types) {
@@ -91,40 +81,11 @@ export const Registry = {
 
         return {
             type: 'index',
-            types: types as ReExportRegistry,
-            vars: vars as ReExportRegistry,
-            async register() {
-
-                for (let i = staticExports.length - 1; i >= 0; i--) {
-                    const entries = staticExports[i]?.entries!;
-                    for (let j = 0; j < entries.length; j++) {
-                        const entry = entries[j]!;
-                        // if entry has module request, it is not a local export
-                        // e.g "export const someVar = someValue"
-                        if (entry.moduleRequest) {
-                            const moduleRequest = entry.moduleRequest;
-                            const request = moduleRequest.value;
-                            const r = entry.isType ? types : vars;
-                            if (!r[request]) {
-                                r[request] = {
-                                    type: 're-export',
-                                    moduleRequest: moduleRequest.value,
-                                    entries: [],
-                                };
-                            }
-                            r[request]!.entries.push(entry);
-                        } else {
-                            //    Error: local definition are not allowed in index files
-                        }
-                    }
-                }
-
-                // await registerExports(types, vars);
-
-            }
+            types: {} as ReExportRegistry,
+            vars: {} as ReExportRegistry
         } as const;
     },
-    File(staticImports: StaticImport[], staticExports: StaticExport[]) {
+    File() {
         // const importTypes: ImportRegistry = {};
         // for (let i = 0; i < staticImports.length; i++) {
         //     const staticImport = staticImports[i]!;

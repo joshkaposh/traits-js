@@ -1,26 +1,19 @@
-import type { ExportNamedDeclaration, TSTypeLiteral, TSTypeReference } from "oxc-parser";
+import type { ExportNamedDeclaration, Node, TSTupleElement, TSTypeAliasDeclaration, TSTypeLiteral, TSTypeReference } from "oxc-parser";
 import { ResolverFactory, type NapiResolveOptions } from "oxc-resolver";
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { checkParseResult, resolve } from "./resolver";
-import { declarationName, isDeclaredInModule, type TraitDeclaration, type TraitAliasDeclaration } from "./node";
+import { isDeclaredInModule, type TraitDeclaration, type TraitAliasDeclaration, type TypeArguments, typeDeclarationSignatures } from "./node";
 import type { ParsedTraitConfigExport } from "../config";
 import { Flags, type FlagsInterface } from "./flags";
-import { TraitDefinition } from "./definition";
-import { TraitFile } from "./trait-file";
-import { Registry, type ImportRegistry, type ModuleImport } from "./registry";
+import { TraitDefinition, type TraitDefinitionMeta } from "./definition";
+import { TraitFile, type TraitExports, type TraitTypeExports } from "./trait-file";
+import { Registry, type ImportRegistry, type Import, type FileRegistry } from "./registry";
 import { walk } from "oxc-walker";
-import { print } from "./helpers";
-import { Stack } from "./stack";
+import { print, timestamp } from "./helpers";
+import { Stack, type VisitFn } from "./stack";
 import { TraitError } from "./error";
-
-
-type ExportedTraitDeclaration = {
-    parent: ExportNamedDeclaration;
-    node: TraitDeclaration;
-    type?: TSTypeLiteral | TSTypeReference;
-};
 
 export type ProjectOptions = {
     cwd: string,
@@ -29,8 +22,6 @@ export type ProjectOptions = {
 };
 
 
-type TraitExports = Record<string, ExportedTraitDeclaration>;
-type TraitTypeExports = Record<string, TraitAliasDeclaration>;
 
 type ResolvedRef = TraitDefinition | { name: string; flags: FlagsInterface };
 
@@ -84,6 +75,7 @@ export class Project {
     }
 
     async createStack() {
+        const then = performance.now();
         const { traits, traitFileNameFilter, indexFileNameFilter } = await this.#getEntry();
 
         this.#indexFileNameFilter = indexFileNameFilter;
@@ -96,134 +88,148 @@ export class Project {
         if (result.packageJson) {
             const json = await Bun.file(result.packageJson).json() as Record<string, any>;
             if ('traits-js' in json.devDependencies) {
-                const modifierPath = resolver.sync(this.#cwd, 'traits-js/modifier');
-                console.log(modifierPath.path);
+                // const modifierPath = resolver.sync(this.#cwd, 'traits-js/modifier');
+                // console.log(modifierPath.path);
             }
         }
 
-        // if (VERBOSE) {
-        //     print('Project', `trait dir = ${result.directory}`);
-        // }
-
-        const s = new Stack<TraitFile>();
-        s.push(result.path, new TraitFile(result, Registry.Index(s, resolver, result.result.module.staticExports)))
+        const s = new Stack<TraitFile>(result.path, new TraitFile(result, Registry.Index()));
+        timestamp('resolve-entry', then);
         return s;
     }
 
-    async register(stack: Stack<TraitFile>) {
-        const self = this;
-        while (stack.length) {
-            const frame = stack.pop()!;
-            await self.scan(stack, frame);
+    async addSourceFiles(stack: Stack<TraitFile>) {
+        const self = this,
+            files = self.#files,
+            visit = createVisitFn(self.#resolver, files, self.#ids, self.#indexFileNameFilter);
+
+        let then = performance.now();
+        await Stack.dfs(stack, visit);
+
+        console.log(timestamp('register', then));
+        then = performance.now();
+        for (let i = 0; i < files.length; i++) {
+            const traits: Record<string, TraitDefinition> = {};
+            const errors: Record<string, TraitError[]> = {};
+            const file = files[i]!;
+            file.initialize(self, traits, errors);
+
         }
+        console.log(timestamp('initialize', then));
 
     }
 
-    async scan(stack: Stack<TraitFile>, file: TraitFile) {
-        const project = this;
-        const resolver = project.#resolver;
-        const indexFilter = project.#indexFileNameFilter;
-        const vars: TraitExports = {};
-        const types: TraitTypeExports = {};
-        // TODO: include these variables above in `registerReExports` and put in `TraitFile.register`
-
-        const exportNames = await file.register(resolver, stack, indexFilter);
-
-        if (VERBOSE) {
-            print('Frame', file.path);
+    parseType(typeArguments: TypeArguments['params'], code: string, typeDeclaration: TSTypeAliasDeclaration | undefined): TraitDefinitionMeta
+        | TraitError[] {
+        if (!typeArguments.length) {
+            return [TraitError.EmptyTraitTypeArguments()];
+        } else if (typeArguments.length > 2) {
+            return [TraitError.InvalidTraitTypeArgument()];
         }
 
-        if (VERBOSE) {
-            console.log('-'.repeat(32));
+        const flagsFor = (typeArgument: Node) => {
+            if (typeArgument.type === 'TSTypeLiteral') {
+                const flags = Flags.fromSignatures(typeDeclarationSignatures(typeArgument)!);
+                return !(flags instanceof Flags) ? [TraitError.CannotConstructFlags()] : flags;
+                // case 'TSTypeReference' 
+            } else if (typeArgument.type === 'TSTypeReference') {
+                if (typeArgument.typeName.type !== 'Identifier') {
+                    return [TraitError.IdentifierNeLiteral(typeArgument, code)];
+                } else if (
+                    // e.g trait<Foo>
+                    // this type is a reference for the trait type alias declaration,
+                    // so we can retrieve it and parse it directly
+                    typeArgument.typeName.name === typeDeclaration?.id.name
+                    && typeDeclaration.typeAnnotation.type === 'TSTypeLiteral'
+                ) {
+                    const flags = Flags.fromSignatures(typeDeclarationSignatures(typeDeclaration)!);
+                    return !(flags instanceof Flags) ? [TraitError.CannotConstructFlags()] : flags;
+                } else {
+                    return [TraitError.CannotConstructFlags()];
+                    // TODO: parse 
+                    // const flags = self.#parseTraitTypeArgumentReference(project, self, traitName, self.#types, typeArgument, typeDeclaration);
+                    // return flags ?? [TraitError.CannotConstructFlags()];
+                }
+            } else {
+                return [TraitError.CannotConstructFlags()];
+            }
         }
 
-        if (exportNames) {
-            walk(file.result.program, {
-                enter(node, parent) {
-                    if (parent && isDeclaredInModule(parent, node)) {
-                        if (node.type === 'VariableDeclaration') {
-                            const name = declarationName(node);
-                            if (name && exportNames.has(name)) {
-                                vars[name] = {
-                                    parent: parent as ExportNamedDeclaration,
-                                    node: node as TraitDeclaration
-                                };
-                            }
+        if (typeArguments.length === 1) {
+            const typeArgument = typeArguments[0];
+            if (!typeArgument) {
+                return [TraitError.EmptyTraitTypeArguments()];
+            }
 
-                        } else if (node.type === 'TSTypeAliasDeclaration' && node.typeAnnotation.type === 'TSTypeLiteral' && exportNames.has(node.id.name)) {
-                            types[node.id.name] = node as TraitAliasDeclaration;
-                        }
+            if (typeArgument.type !== 'TSTupleType') {
+                const f = flagsFor(typeArgument);
+                return f instanceof Flags ? { base: f, derives: [], implementationObject: null } : f;
+            } else {
+                const tupleTypes = typeArgument.elementTypes;
+                if (!tupleTypes.length) {
+                    return [TraitError.CannotConstructFlags()];
+                } else if (tupleTypes.length === 1 && tupleTypes[0]) {
+                    const f = flagsFor(tupleTypes[0]);
+                    return f instanceof Flags ? { base: f, derives: [], implementationObject: null } : f;
+                } else {
+                    const baseType = tupleTypes.at(-1);
+
+                    if (!baseType) {
+                        return [TraitError.CannotConstructFlags()];
                     }
 
-                },
-            });
+
+                    const f = flagsFor(baseType);
+                    return f instanceof Flags ? {
+                        base: f,
+                        derives: tupleTypes.slice(0, tupleTypes.length - 1),
+                        implementationObject: null
+                    } : f;
+                    // return !baseType ?
+                    // [TraitError.CannotConstructFlags()] :
+                    // {base: flagsFor(baseType), tupleTypes.slice(0, tupleTypes.length - 1)}
+                }
+            }
         }
 
+        return [TraitError.CannotConstructFlags()];
+
+    }
+
+    parseDerives(traits: ReadOnlyDict<TraitDefinition>, registry: FileRegistry, path: string) {
+        const self = this,
+            { importTypes, importVars } = registry;
 
         const errors: Record<string, TraitError[]> = {};
-        const traits: Record<string, TraitDefinition> = {};
+        for (const traitName in traits) {
+            const def = traits[traitName]!;
+            const uninitDerives = def.uninitializedDerives;
 
-        for (const varName in vars) {
-            const traitDec = vars[varName]!;
-            const { parent, node } = traitDec;
-            if (node.kind !== 'const') {
-                errors[varName] = [TraitError.LetDeclaration()];
-                continue
+            if (!uninitDerives.every(t => t.type === 'TSTypeReference')) {
+                errors[traitName] = [TraitError.InvalidDeriveType()];
+                continue;
             }
 
-            const declarator = node.declarations[0];
-            const start = parent.start;
-            const end = parent.end;
+            const derives = self.resolveDerives(
+                self,
+                importTypes,
+                importVars,
+                traits,
+                uninitDerives,
+                path
+            );
 
-            // TODO: use importName of "trait" instead of hard-coded here
-            if (declarator.init.type === 'CallExpression' && declarator.init.callee.name === TRAIT_FN_NAME) {
-                // console.log('REGISTER: ', varName);
-                const call_expr = declarator.init;
-                const args = call_expr.arguments;
-
-                const definition_errors: TraitError[] = [];
-
-                if (args.length !== 1) {
-                    definition_errors.push(TraitError.InvalidTraitCallArguments());
-                    errors[varName] = definition_errors;
-                    traits[varName] = new TraitDefinition(varName, start, end, false)
-                    continue;
-                }
-
-                // !PARSE
-                const base = file.parseBase(file, call_expr.typeArguments.params, types[varName]);
-
-                if (Array.isArray(base)) {
-                    definition_errors.push(...base);
-                    traits[varName] = new TraitDefinition(varName, start, end, false)
-                    continue;
-                }
-                // console.log('REGISTER: parsed base flags', varName);
-                traits[varName] = new TraitDefinition(varName, start, end, true, base);
+            if (derives.valid) {
+                def.join(derives.derives);
+                print('parseDerives', `name = ${def.name}`)
+                print('parseDerives', `base = ${JSON.stringify(Object.fromEntries(Object.entries(def.flags.byName).map(([k, v]) => [k, Object.keys(v)])), null, 2)}`)
+                print('parseDerives', `derives = ${JSON.stringify(Object.fromEntries(Object.entries(def.flags.derivesByName).map(([k, v]) => [k, Object.keys(v)])), null, 2)}`)
+            } else {
+                console.log('[fail]: %s ', traitName);
+                def.invalidate();
             }
+
         }
-
-        file.addDefinitions(traits);
-        project.add(file);
-    }
-
-    initialize() {
-        const project = this,
-            files = project.#files;
-
-        for (let i = 0; i < files.length; i++) {
-            files[i]!.parseDerives(project);
-        }
-    }
-
-    add(traitFile: TraitFile): number {
-        const files = this.#files,
-            ids = this.#ids;
-
-        const id = files.length;
-        files.push(traitFile);
-        ids[traitFile.path] = id;
-        return id;
     }
 
     get(path: string): TraitFile | undefined {
@@ -243,7 +249,7 @@ export class Project {
         } else {
             const importVar = importRegistry[lookupName];
             if (importVar) {
-                const actual = project.resolveReferenceFromRequest(project, file.directory, importVar, lookupName);
+                const actual = project.resolveReferenceFromRequest(project, importVar, file.directory, lookupName);
                 if (actual) {
                     return actual;
                 }
@@ -251,13 +257,11 @@ export class Project {
         }
     }
 
-    resolveReferenceFromRequest(project: Project, directory: string, importVar: ModuleImport, localName: string) {
+    resolveReferenceFromRequest(project: Project, importVar: Import, directory: string, localName: string) {
         const resolver = project.resolver;
-        console.log('RESOLVING REQUEST FOR: ', directory, importVar.moduleRequest);
-
         const resolvedRequest = resolver.sync(dirname(directory), importVar.moduleRequest);
         if (resolvedRequest.path) {
-            console.log('FOUND TRAIT FILE:', resolvedRequest.path);
+            // console.log('FOUND TRAIT FILE:', resolvedRequest.path);
             if (resolvedRequest.path.startsWith(project.#cwd)) {
 
                 const previous = project.get(resolvedRequest.path);
@@ -276,18 +280,15 @@ export class Project {
         }
     }
 
-
-    constructDeriveFlags(
+    resolveDerives(
         project: Project,
         importTypes: ImportRegistry,
         importVars: ImportRegistry,
-        types: TraitTypeExports,
-        traits: Record<string, TraitDefinition>,
+        traits: ReadOnlyDict<TraitDefinition>,
         derives: TSTypeReference[],
         path: string
     ) {
 
-        console.log('CONSTRUCT:DERIVES', derives.map(d => d.typeName.type === 'Identifier' ? d.typeName.name : void 0).filter(Boolean));
         const errors: TraitError[] = [];
 
         if (!derives.every(d => d.type === 'TSTypeReference' && d.typeName.type === 'Identifier')) {
@@ -295,39 +296,18 @@ export class Project {
             errors.push(TraitError.InvalidDeriveType());
             return { valid: false, errors } as const;
         }
-        // time to resolve derives
-        const queuedDerives: { name: string; path?: string; flags: FlagsInterface }[] = [];
+
+        const queuedDerives: TraitDefinition[] = [];
         for (let i = 0; i < derives.length; i++) {
             const element = derives[i]!;
             if (element.type === 'TSTypeReference' && element.typeName.type === 'Identifier') {
                 const lookupName = element.typeName.name;
                 if (traits[lookupName]) {
-                    console.log('lookup:localTraits - ', lookupName);
                     const t = traits[lookupName]!;
-                    // console.log('Pushing local trait: ', t.name);
                     queuedDerives.push(t);
-                } else if (types[lookupName]) {
-                    console.log('lookup:localTypes - ', lookupName);
-
-                    const localType = types[lookupName];
-                    // TODO: add to trait flags instead of adding flags right here
-                    const flags = Flags.fromSignatures(localType.typeAnnotation.members);
-                    if (!(flags instanceof Flags)) {
-                        break;
-                    }
-
-                    queuedDerives.push({
-                        name: localType.id.name,
-                        path: path,
-                        flags: flags
-                    });
                 } else if (importVars[lookupName]) {
-                    console.log('lookup:importVars - ', lookupName);
-                    const actual = project.resolveReferenceFromRequest(project, path, importVars[lookupName]!, lookupName);
-                    console.log('lookup:importVars - resolved', lookupName, actual?.name, actual?.valid);
-
+                    const actual = project.resolveReferenceFromRequest(project, importVars[lookupName], path, lookupName);
                     if (actual && actual.valid) {
-                        // console.log('Pushing imported: ', actual.name);
                         queuedDerives.push(actual);
                     } else {
                         errors.push(TraitError.RefNotFound(path, lookupName));
@@ -341,9 +321,6 @@ export class Project {
                 }
             }
         }
-
-        console.log('construct: len check', derives.length, queuedDerives.length);
-
 
         if (derives.length !== queuedDerives.length) {
             errors.push(TraitError.InvalidDeriveType());
@@ -360,6 +337,111 @@ export class Project {
             process.exit(1);
         }
         return entryOrError;
+    }
+}
+
+function createVisitFn(resolver: ResolverFactory, files: TraitFile[], ids: Record<string, number>, indexFilter: string): VisitFn<TraitFile, string> {
+    return async (file, visited, queue) => {
+        console.log('visit: ', file.path);
+
+        const id = files.length;
+        files.push(file);
+        ids[file.path] = id;
+
+        const directory = file.directory,
+            registry = file.registry;
+
+        if (registry.type === 'index') {
+            const reExportTypes = registry.types;
+            const reExportVars = registry.vars;
+            const staticExports = file.result.module.staticExports;
+            for (let i = staticExports.length - 1; i >= 0; i--) {
+                const entries = staticExports[i]?.entries!;
+                for (let j = 0; j < entries.length; j++) {
+                    const entry = entries[j]!;
+                    // if entry has module request, it is not a local export
+                    // e.g "export const someVar = someValue"
+                    // TODO: error if re-exports are not inside traits dir
+                    if (entry.moduleRequest) {
+                        const moduleRequest = entry.moduleRequest;
+                        const request = moduleRequest.value;
+                        const r = entry.isType ? reExportTypes : reExportVars;
+                        const resolveResult = resolver.sync(directory, request);
+                        const absolutePath = resolveResult.path;
+
+                        if (!r[request]) {
+                            r[request] = {
+                                type: 're-export',
+                                moduleRequest: moduleRequest.value,
+                                entries: [],
+                            };
+                        }
+                        r[request]!.entries.push(entry);
+
+                        if (absolutePath && !visited.has(absolutePath)) {
+                            const newParseResult = await resolve(resolver, absolutePath, indexFilter);
+                            checkParseResult(newParseResult, absolutePath);
+                            const isIndex = newParseResult.path.endsWith(indexFilter);
+                            queue(newParseResult.path, new TraitFile(
+                                newParseResult,
+                                isIndex ? Registry.Index() : Registry.File()
+                            ));
+                        }
+
+                    } else {
+                        //    Error: local definition are not allowed in index files
+                    }
+                }
+            }
+        } else {
+            const staticImports = file.result.module.staticImports;
+            const staticExports = file.result.module.staticExports;
+
+            const importTypes = registry.importTypes;
+            const importVars = registry.importVars;
+
+            const exportTypes = registry.exportTypes;
+            const exportVars = registry.exportVars;
+
+            for (let index = 0; index < staticImports.length; index++) {
+                const staticImport = staticImports[index]!;
+                const entries = staticImport.entries;
+                const localToImport = Object.fromEntries(entries.map(e => [e.localName.value, e.importName.name]));
+                for (let j = 0; j < entries.length; j++) {
+                    const e = entries[j]!;
+                    const r = e.isType ? importTypes : importVars;
+                    const local = e.localName;
+                    r[local.value] = {
+                        type: e.importName.kind,
+                        localToImport: localToImport,
+                        moduleRequest: staticImport.moduleRequest.value
+                    };
+                }
+            }
+
+            for (let i = staticExports.length - 1; i >= 0; i--) {
+                const entries = staticExports[i]?.entries!;
+                for (let j = 0; j < entries.length; j++) {
+                    const entry = entries[j]!;
+                    // if entry has module request, it is not a local export
+                    // e.g "export const someVar = someValue"
+                    if (entry.moduleRequest) {
+                        // Error: re-exports from a trait file is not allowed
+                    } else {
+                        const bindingName = entry.exportName.name;
+                        // can only be a local if not in imports
+                        if (bindingName && !(bindingName in (entry.isType ? importTypes : importVars))) {
+                            // locals adds every code string
+                            if (entry.isType) {
+                                exportTypes[bindingName] = entry;
+                            } else {
+                                exportVars[bindingName] = entry;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

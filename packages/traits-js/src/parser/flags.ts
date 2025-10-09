@@ -29,79 +29,82 @@ import { TraitError } from "./error";
  *
  */
 
-// const FLAGS = {
-//     evaluate(): number {
-//         return 0;
-//     },
-//     make(isStatic: boolean, isProvided: boolean) {
-//         return (isStatic ? STATIC : INSTANCE) | (isProvided ? DEFAULT : REQUIRED);
-//     },
-//     has(flags: number, flag: number) {
-//         return flags & flag;
-//     },
+const FLAGS = {
+    // serialize(name: string, flags: number): SerializedFlags {
+    //     return `${name}:${flags}`;
+    // },
 
-//     serialize(name: string, flags: number): SerializedFlags {
-//         return `${name}:${flags}`;
-//     },
+    // deserialize(str: SerializedFlags) {
+    //     let flags = 0;
+    //     let index = 0;
 
-//     deserialize(str: SerializedFlags) {
-//         let flags = 0;
-//         let index = 0;
+    //     const [] = str.split(':');
 
-//         const [] = str.split(':');
+    //     while (true) {
+    //         const char = str[index]!;
+    //         if (char in CHARS) {
+    //             index++;
+    //             flags |= CHARS[char]!;
+    //         } else {
+    //             return [flags, str.slice(index)] as [number, string];
+    //         }
+    //     }
+    // },
 
-//         while (true) {
-//             const char = str[index]!;
-//             if (char in CHARS) {
-//                 index++;
-//                 flags |= CHARS[char]!;
-//             } else {
-//                 return [flags, str.slice(index)] as [number, string];
-//             }
-//         }
-//     },
+    toString(flags: number) {
+        let result = '';
 
-//     toString(flags: number) {
-//         let result = '';
+        if (flags & INSTANCE) {
+            result += 'instance';
+        } else {
+            result += 'static';
+        }
 
-//         if (flags & INSTANCE) {
-//             result += 'instance';
-//         } else {
-//             result += 'static';
-//         }
+        if (flags & DEFAULT) {
+            result += ", provided";
+        } else {
+            result += ', required';
+        }
 
-//         if (flags & DEFAULT) {
-//             result += ", provided";
-//         } else {
-//             result += ', required';
-//         }
+        return result;
+    }
+} as const;
 
-//         return result;
-//     }
-// } as const;
+export const REQUIRED = 0x000001;
+export const DEFAULT = 0x000010;
+export const STATIC = 0x000100;
+export const INSTANCE = 0x001000;
+export const CONST = 0x010000;
+export const DERIVE = 0x100000;
 
-export const REQUIRED = 0x00001;
-export const DEFAULT = 0x00010;
-export const STATIC = 0x00100;
-export const INSTANCE = 0x01000;
-export const CONST = 0x10000;
+class ByName {
+    readonly staticDefault: NameSet;
+    readonly staticRequired: NameSet;
+
+    readonly instanceDefault: NameSet;
+    readonly instanceRequired: NameSet;
+
+    constructor(staticDefault: NameSet = {}, staticRequired: NameSet = {}, instanceDefault: NameSet = {}, instanceRequired: NameSet = {}) {
+        this.staticDefault = staticDefault;
+        this.staticRequired = staticRequired;
+        this.instanceDefault = instanceDefault;
+        this.instanceRequired = instanceRequired;
+    }
+};
 
 export interface FlagsInterface {
 
     readonly flags: readonly number[];
     readonly names: readonly string[];
-    readonly nameSet: NameSet;
 
-    readonly staticNames: NameSet;
-    readonly staticDefaultNames: NameSet;
-    readonly staticRequiredNames: NameSet;
+    readonly baseNames: ReadonlySet<string>;
+    readonly deriveNames: ReadonlySet<string>;
+    readonly byName: ByName;
+    readonly derivesByName: ByName;
 
-    readonly instanceNames: NameSet;
-    readonly instanceDefaultNames: NameSet;
-    readonly instanceRequiredNames: NameSet;
 
-    isDisjointFrom(other: FlagsInterface): boolean
-    isDisjointFromDerives(derives: FlagsInterface[]): boolean;
+    // isDisjointFrom(other: FlagsInterface): boolean
+    // isDisjointFromDerives(derives: FlagsInterface[]): boolean;
 
     entries(): FlagsIterator;
 
@@ -124,96 +127,97 @@ const CONSTANT_VALUE = {
     TSStringKeyword: 3,
 } as const;
 
-export type NameSet = ReadonlySet<string>;
+export type NameSet = Record<string, number>;
 
 export class Flags implements FlagsInterface {
 
     constructor(
-        names: readonly string[],
-        flags: readonly number[],
-        byName: Record<string, number>,
-        nameSet?: NameSet,
-        staticNames?: NameSet,
-        staticDefaultNames?: NameSet,
-        staticRequiredNames?: NameSet,
-        instanceNames?: NameSet,
-        instanceDefaultNames?: NameSet,
-        instanceRequiredNames?: NameSet,
+        names: readonly string[] = [],
+        flags: readonly number[] = [],
+        byName: ByName = new ByName(),
+        derivesByName: ByName = new ByName(),
+        baseNames: ReadonlySet<string> = new Set(),
+        deriveNames: ReadonlySet<string> = new Set()
     ) {
 
-        if (!staticNames) {
-            const _staticNames = new Set<string>(),
-                _staticRequiredNames = new Set<string>(),
-                _staticDefaultNames = new Set<string>(),
-                _instanceNames = new Set<string>(),
-                _instanceRequiredNames = new Set<string>(),
-                _instanceDefaultNames = new Set<string>();
+        // if (!staticNames) {
+        //     const _staticNames: NameSet = {},
+        //         _staticRequiredNames: NameSet = {},
+        //         _staticDefaultNames: NameSet = {},
+        //         _instanceNames: NameSet = {},
+        //         _instanceRequiredNames: NameSet = {},
+        //         _instanceDefaultNames: NameSet = {};
 
-            for (let index = 0; index < names.length; index++) {
-                const f = flags[index]!;
-                const n = names[index]!;
-                if (f & STATIC) {
-                    _staticNames.add(n);
-                    if (f & REQUIRED) {
-                        _staticRequiredNames.add(n)
-                    } else {
-                        _staticDefaultNames.add(n)
-                    }
-                } else {
-                    _instanceNames.add(n);
-                    if (f & REQUIRED) {
-                        _instanceRequiredNames.add(n)
-                    } else {
-                        _instanceDefaultNames.add(n)
-                    }
-                }
+        //     for (let index = 0; index < names.length; index++) {
+        //         const f = flags[index]!;
+        //         const n = names[index]!;
+        //         if (f & STATIC) {
+        //             _staticNames[n] = f;
+        //             if (f & REQUIRED) {
+        //                 _staticRequiredNames[n] = f;
+        //             } else {
+        //                 _staticDefaultNames[n] = f;
+        //             }
+        //         } else {
+        //             _instanceNames[n] = f;
+        //             if (f & REQUIRED) {
+        //                 _instanceRequiredNames[n] = f
+        //             } else {
+        //                 _instanceDefaultNames[n] = f
+        //             }
+        //         }
 
-            }
+        //     }
 
-            staticNames = _staticNames;
-            staticDefaultNames = _staticDefaultNames;
-            staticRequiredNames = _staticRequiredNames;
-            instanceNames = _instanceNames;
-            instanceDefaultNames = _instanceDefaultNames;
-            instanceRequiredNames = _instanceRequiredNames;
-        }
+        //     staticNames = _staticNames;
+        //     staticDefaultNames = _staticDefaultNames;
+        //     staticRequiredNames = _staticRequiredNames;
+        //     instanceNames = _instanceNames;
+        //     instanceDefaultNames = _instanceDefaultNames;
+        //     instanceRequiredNames = _instanceRequiredNames;
+        // }
 
         this.#names = names;
         this.#flags = flags;
         this.#byName = byName;
-        this.#nameSet = nameSet ?? new Set(names);
-        this.#static = staticNames;
-        this.#staticRequired = staticRequiredNames!;
-        this.#staticDefault = staticDefaultNames!;
-        this.#instance = instanceNames!;
-        this.#instanceRequired = instanceRequiredNames!;
-        this.#instanceDefault = instanceDefaultNames!;
+        this.#derivesByName = derivesByName;
+        this.#baseNames = baseNames;
+        this.#deriveNames = deriveNames;
+        // this.#static = staticNames;
+        // this.#staticRequired = staticRequiredNames!;
+        // this.#staticDefault = staticDefaultNames!;
+        // this.#instance = instanceNames!;
+        // this.#instanceRequired = instanceRequiredNames!;
+        // this.#instanceDefault = instanceDefaultNames!;
     }
 
-    static from(names: string[] | readonly string[], flags: number[] | readonly number[]) {
-        const byName: Record<string, number> = {};
-        for (let i = 0; i < flags.length; i++) {
-            byName[names[i]!] = flags[i]!;
-        }
+    // static from(names: string[] | readonly string[], flags: number[] | readonly number[]) {
+    //     const byName: Record<string, number> = {};
+    //     for (let i = 0; i < flags.length; i++) {
+    //         byName[names[i]!] = flags[i]!;
+    //     }
 
-        return new Flags(Object.freeze(names), Object.freeze(flags), Object.freeze(byName));
-    }
+    //     return new Flags(Object.freeze(names), Object.freeze(flags), Object.freeze(byName));
+    // }
 
-    static fromEntries(entries: Iterable<[name: string, flags: number]>) {
-        const names = [];
-        const flags = [];
-        for (const [name, flag] of entries) {
-            names.push(name);
-            flags.push(flag);
-        }
+    // static fromEntries(entries: Iterable<[name: string, flags: number]>) {
+    //     const names = [];
+    //     const flags = [];
+    //     for (const [name, flag] of entries) {
+    //         names.push(name);
+    //         flags.push(flag);
+    //     }
 
-        return new Flags(Object.freeze(names), Object.freeze(flags), Object.freeze(Object.fromEntries(entries)));
-    }
+    //     return new Flags(Object.freeze(names), Object.freeze(flags), Object.freeze(Object.fromEntries(entries)));
+    // }
 
     static fromSignatures(signatures: TSSignature[]) {
         const names: string[] = [];
         const flags: number[] = [];
-        const byName: Record<string, number> = Object.create(null);
+
+        const baseNames = new Set<string>();
+        const byName = new ByName();
+
         const errors: TraitError[] = [];
         const unknowns = [];
         for (let i = 0; i < signatures.length; i++) {
@@ -233,10 +237,11 @@ export class Flags implements FlagsInterface {
 
             if (signature.type === 'TSMethodSignature' && signature.key.type === 'Identifier') {
                 //! STATIC
-                addFlags(names, flags, byName, signatureName, STATIC | (signature.optional ? DEFAULT : REQUIRED))
+                addFlags(names, flags, signature.optional ? byName.staticDefault : byName.staticRequired, signatureName, STATIC | (signature.optional ? DEFAULT : REQUIRED))
+                baseNames.add(signatureName);
+
             } else if (signature.type === 'TSPropertySignature' && signature.key.type === 'Identifier' && signature.typeAnnotation) {
                 const annot = signature.typeAnnotation.typeAnnotation;
-                console.log(signature.key.name);
 
                 if (annot.type === 'TSTypeLiteral' && signature.key.name === PROPERTY_INSTANCE_KEY) {
                     //! INSTANCE
@@ -244,7 +249,10 @@ export class Flags implements FlagsInterface {
                     for (let j = 0; j < instanceSigs.length; j++) {
                         const signature = instanceSigs[j]!;
                         if (signature.type === 'TSMethodSignature' && signature.key.type === 'Identifier') {
-                            addFlags(names, flags, byName, signature.key.name, INSTANCE | (signature.optional ? DEFAULT : REQUIRED))
+                            const isDefault = signature.optional,
+                                instanceName = signature.key.name;
+                            addFlags(names, flags, isDefault ? byName.instanceDefault : byName.instanceRequired, instanceName, INSTANCE | (isDefault ? DEFAULT : REQUIRED))
+                            baseNames.add(instanceName);
                         } else {
                             unknowns.push(signature);
                         }
@@ -261,7 +269,8 @@ export class Flags implements FlagsInterface {
                         continue;
                     }
 
-                    addFlags(names, flags, byName, signatureName, CONST);
+                    baseNames.add(signatureName);
+                    addFlags(names, flags, byName.staticRequired, signatureName, CONST);
                 }
             } else {
                 unknowns.push(signature);
@@ -269,12 +278,55 @@ export class Flags implements FlagsInterface {
             }
         }
 
-        return errors.length || unknowns.length ? { errors, signatures } : new Flags(names, flags, byName);
+        return errors.length || unknowns.length ? { errors, signatures } : new Flags(names, flags, byName, new ByName(), baseNames, new Set());
     }
 
-    static withDerives(base: FlagsInterface, derivedFlags: DerivedFlags) {
-        return FlagsWithDerives.fromDerives(base, derivedFlags);
+    static fromDerives(base: FlagsInterface, derives: DerivedFlags) {
+        const joinedNames = Array.from(base.names);
+        const joinedFlags = Array.from(base.flags);
+        const byName = new ByName();
+        const deriveNames = new Set<string>()
+        const derivesByName: Record<string, FlagsInterface> = Object.create(null);
+        const derivedNamesFlags: [name: string, flags: FlagsInterface][] = [];
+
+        for (let i = 0; i < derives.length; i++) {
+            const { name, flags } = derives[i]!;
+            derivesByName[name] = flags;
+
+            const names = flags.names;
+            const flagsOfDerives = flags.flags;
+            derivedNamesFlags.push([names[i]!, flags]);
+
+            for (let j = 0; j < names.length; j++) {
+                const n = names[j]!;
+                const f = flagsOfDerives[j]! | DERIVE;
+
+                deriveNames.add(n);
+                joinedFlags.push(f);
+                joinedNames.push(n);
+                byName[`${(f & (STATIC | CONST)) ? 'static' : 'instance'}${f & DEFAULT ? 'Default' : 'Required'}`][n] = f;
+            }
+        }
+
+        return new Flags(joinedNames, joinedFlags, base.byName, byName, base.baseNames, deriveNames)
+        // return new FlagsWithDerives(
+        //     base,
+        //     new Flags(
+        //         joinedNames,
+        //         joinedFlags,
+        //         base.byName,
+        //         byName,
+        //         base.baseNames,
+        //         deriveNames
+        //     ),
+        //     derivedNamesFlags,
+        //     derivesByName,
+        // );
     }
+
+    // static withDerives(base: FlagsInterface, derivedFlags: DerivedFlags) {
+    //     return FlagsWithDerives.fromDerives(base, derivedFlags);
+    // }
 
     get names() {
         return this.#names;
@@ -284,121 +336,40 @@ export class Flags implements FlagsInterface {
         return this.#flags;
     }
 
-    get nameSet() {
-        return this.#nameSet;
+    get baseNames() {
+        return this.#baseNames;
     }
 
-    get staticNames() {
-        return this.#static;
+    get deriveNames() {
+        return this.#deriveNames;
     }
 
-    get staticDefaultNames() {
-        return this.#staticDefault;
+    get byName() {
+        return this.#byName;
     }
 
-    get staticRequiredNames() {
-        return this.#staticRequired;
-
+    get derivesByName() {
+        return this.#derivesByName;
     }
 
-    get instanceNames() {
-        return this.#instance;
-    }
-
-    get instanceDefaultNames() {
-        return this.#instanceDefault;
-    }
-
-    get instanceRequiredNames() {
-        return this.#instanceRequired;
-
-    }
 
     clone() {
         return new Flags(
             this.#names,
             this.#flags,
             this.#byName,
-            this.#nameSet,
-            this.#static,
-            this.#staticDefault,
-            this.#staticRequired,
-            this.#instance,
-            this.#instanceDefault,
-            this.#instanceRequired
+            this.#derivesByName,
+            this.#baseNames,
+            this.#deriveNames
+            // this.#static,
+            // this.#staticDefault,
+            // this.#staticRequired,
+            // this.#instance,
+            // this.#instanceDefault,
+            // this.#instanceRequired
         );
     }
 
-    static serialize(flags: FlagsInterface) {
-
-        if (flags instanceof FlagsWithDerives) {
-            const len = flags.names.length;
-            const lastDeriveIndex = len - flags.baseNames.length;
-            return {
-                type: 'WithDerives',
-                baseNames: flags.baseNames,
-                baseFlags: flags.baseFlags,
-                derivedNames: flags.names.slice(0, lastDeriveIndex),
-                derivedFlags: flags.flags.slice(0, lastDeriveIndex)
-            } as const
-        } else {
-            return {
-                type: 'Flags',
-                names: flags.names,
-                flags: flags.flags
-            } as const;
-        }
-    }
-
-    static deserialize(serialized: ReturnType<typeof Flags['serialize']>) {
-
-        if (serialized.type === 'Flags') {
-            return Flags.from(serialized.names, serialized.flags)
-        } else {
-            const { baseFlags, baseNames, derivedFlags, derivedNames } = serialized;
-            const base = Flags.from(baseNames, baseFlags);
-
-            // return new FlagsWithDerives(base, )
-        }
-        // const [names, flags] = serialized;
-        // for (let i = 0; i < names.length; i++) {
-        //     const element = names[i];
-
-        // }
-    }
-
-    isDisjointFrom(other: FlagsInterface) {
-        return this.#static.isDisjointFrom(other.staticDefaultNames) && this.#instance.isDisjointFrom(other.instanceDefaultNames);
-    }
-
-    isDisjointFromDerives(derives: FlagsInterface[]) {
-        const staticNames = this.#static,
-            instanceNames = this.#instance;
-
-        for (let i = 0; i < derives.length; i++) {
-            const current = derives[i]!;
-            const currentStaticNames = current.staticNames,
-                currentInstanceNames = current.instanceNames;
-
-            if (!currentStaticNames.isDisjointFrom(staticNames) || !currentInstanceNames.isDisjointFrom(instanceNames)) {
-                return false;
-            }
-
-            for (let j = 0; j < derives.length; j++) {
-                if (i === j) {
-                    continue
-                }
-                const other = derives[j]!;
-
-                if (!currentStaticNames.isDisjointFrom(other.staticNames) || !currentInstanceNames.isDisjointFrom(other.instanceNames)) {
-                    return false;
-                }
-            }
-
-        }
-
-        return true;
-    }
 
     entries() {
         return new FlagsIterator(this.#flags, this.#names);
@@ -408,158 +379,228 @@ export class Flags implements FlagsInterface {
         return new FlagsIterator(this.#flags, this.#names);
     }
 
+
+    // static serialize(flags: FlagsInterface) {
+
+    //     if (flags instanceof FlagsWithDerives) {
+    //         const len = flags.names.length;
+    //         const lastDeriveIndex = len - flags.joinedBaseNames.length;
+    //         return {
+    //             type: 'WithDerives',
+    //             baseNames: flags.baseNames,
+    //             baseFlags: flags.baseFlags,
+    //             derivedNames: flags.names.slice(0, lastDeriveIndex),
+    //             derivedFlags: flags.flags.slice(0, lastDeriveIndex)
+    //         } as const
+    //     } else {
+    //         return {
+    //             type: 'Flags',
+    //             names: flags.names,
+    //             flags: flags.flags
+    //         } as const;
+    //     }
+    // }
+
+    // static deserialize(serialized: ReturnType<typeof Flags['serialize']>) {
+    //     if (serialized.type === 'Flags') {
+    //         return Flags.from(serialized.names, serialized.flags)
+    //     } else {
+    //         // const { baseFlags, baseNames, derivedFlags, derivedNames } = serialized;
+    //         // const base = Flags.from(baseNames, baseFlags);
+
+    //         // return new FlagsWithDerives(base, )
+    //     }
+    //     // const [names, flags] = serialized;
+    //     // for (let i = 0; i < names.length; i++) {
+    //     //     const element = names[i];
+
+    //     // }
+    // }
+
+    // isDisjointFrom(other: FlagsInterface) {
+    //     return this.#static.isDisjointFrom(other.staticDefaultNames) && this.#instance.isDisjointFrom(other.instanceDefaultNames);
+    // }
+
+    // isDisjointFromDerives(derives: FlagsInterface[]) {
+    //     const staticNames = this.#static,
+    //         instanceNames = this.#instance;
+
+    //     for (let i = 0; i < derives.length; i++) {
+    //         const current = derives[i]!;
+    //         const currentStaticNames = current.staticNames,
+    //             currentInstanceNames = current.instanceNames;
+
+    //         if (!currentStaticNames.isDisjointFrom(staticNames) || !currentInstanceNames.isDisjointFrom(instanceNames)) {
+    //             return false;
+    //         }
+
+    //         for (let j = 0; j < derives.length; j++) {
+    //             if (i === j) {
+    //                 continue
+    //             }
+    //             const other = derives[j]!;
+
+    //             if (!currentStaticNames.isDisjointFrom(other.staticNames) || !currentInstanceNames.isDisjointFrom(other.instanceNames)) {
+    //                 return false;
+    //             }
+    //         }
+
+    //     }
+
+    //     return true;
+    // }
+
+
     #names: readonly string[];
     #flags: readonly number[];
 
-    #nameSet: NameSet;
+    #byName: ByName;
+    #derivesByName: ByName;
 
-    #static: NameSet;
-    #staticRequired: NameSet;
-    #staticDefault: NameSet;
-    #instance: NameSet;
-    #instanceRequired: NameSet;
-    #instanceDefault: NameSet;
+    #baseNames: ReadonlySet<string>;
+    #deriveNames: ReadonlySet<string>;
 
-    #byName: Record<string, number>;
+
+    // #static: NameSet;
+    // #staticRequired: NameSet;
+    // #staticDefault: NameSet;
+    // #instance: NameSet;
+    // #instanceRequired: NameSet;
+    // #instanceDefault: NameSet;
+
 }
 
 export type ParsedDerives = ({ implicit: true; type: FlagsInterface } | { implicit: false; type: TraitDefinition })[]
 
 export type DerivedFlags = Array<{ name: string; flags: FlagsInterface }>;
 
-class FlagsWithDerives implements FlagsInterface {
-    #baseFlags: FlagsInterface;
-    #joined: FlagsInterface;
-    #derives: [string, FlagsInterface][];
-    #derivesByName: Record<string, FlagsInterface>;
+// class FlagsWithDerives implements FlagsInterface {
+//     #baseFlags: FlagsInterface;
+//     #joined: FlagsInterface;
+//     // #derives: [string, FlagsInterface][];
+//     #deriveFlagsByName: Record<string, FlagsInterface>;
+//     #derivesByName: ByName;
 
-    constructor(base: FlagsInterface, joined: FlagsInterface, derives: [string, FlagsInterface][], derivesByName: Record<string, FlagsInterface>) {
-        this.#baseFlags = base;
-        this.#joined = joined;
-        this.#derives = derives;
-        this.#derivesByName = derivesByName;
-    }
+//     constructor(base: FlagsInterface, joined: FlagsInterface, deriveFlagsByName: Record<string, FlagsInterface>) {
+//         const sd: NameSet = {},
+//             sr: NameSet = {},
+//             id: NameSet = {},
+//             ir: NameSet = {};
 
-    static fromDerives(base: FlagsInterface, derives: DerivedFlags) {
-        const derivesByName: Record<string, FlagsInterface> = Object.create(null);
-        const derivedNamesFlags: [name: string, flags: FlagsInterface][] = [];
-        const byName: Record<string, number> = Object.create(null);
-        const joinedNames = [];
-        const joinedFlags = [];
+//         for (const traitName in deriveFlagsByName) {
+//             const deriveFlags = deriveFlagsByName[traitName]!;
+//             for (const [name, flags] of deriveFlags) {
 
-        for (let i = 0; i < derives.length; i++) {
-            const { name, flags } = derives[i]!;
-            derivesByName[name] = flags;
+//             }
 
-            const names = flags.names;
-            const flagsFlags = flags.flags;
-            derivedNamesFlags.push([names[i]!, flags]);
+//         }
 
-            for (let j = 0; j < names.length; j++) {
-                const n = names[j]!;
-                const f = flagsFlags[j]!;
-                byName[n] = f;
-                joinedFlags.push(f);
-                joinedNames.push(n);
-            }
-        }
+//         this.#baseFlags = base;
+//         this.#joined = joined;
+//         this.#derivesByName = new ByName(sd, sr, id, ir);
+//         this.#deriveFlagsByName = deriveFlagsByName;
 
-        joinedNames.push(...base.names);
-        joinedFlags.push(...base.flags);
+//     }
 
+//     static fromDerives(base: FlagsInterface, derives: DerivedFlags) {
+//         const joinedNames = Array.from(base.names);
+//         const joinedFlags = Array.from(base.flags);
+//         const byName = new ByName();
+//         const deriveNames = new Set<string>()
+//         const derivesByName: Record<string, FlagsInterface> = Object.create(null);
+//         const derivedNamesFlags: [name: string, flags: FlagsInterface][] = [];
 
-        return new FlagsWithDerives(
-            base,
-            new Flags(
-                joinedNames,
-                joinedFlags,
-                byName
-            ),
-            derivedNamesFlags,
-            derivesByName,
-        );
-    }
+//         for (let i = 0; i < derives.length; i++) {
+//             const { name, flags } = derives[i]!;
+//             derivesByName[name] = flags;
 
-    get names() {
-        return this.#joined.names;
-    }
+//             const names = flags.names;
+//             const flagsOfDerives = flags.flags;
+//             derivedNamesFlags.push([names[i]!, flags]);
 
-    get nameSet() {
-        return this.#joined.nameSet;
-    }
+//             for (let j = 0; j < names.length; j++) {
+//                 const n = names[j]!;
+//                 const f = flagsOfDerives[j]! | DERIVE;
+//                 byName[`${f & STATIC ? 'static' : 'instance'}${f & DEFAULT ? 'Default' : 'Required'}`][n] = f;
+//                 deriveNames.add(n);
+//                 joinedFlags.push(f);
+//                 joinedNames.push(n);
+//             }
+//         }
 
-    get staticNames() {
-        return this.#joined.staticNames;
-    }
+//         return new FlagsWithDerives(
+//             base,
+//             new Flags(
+//                 joinedNames,
+//                 joinedFlags,
+//                 base.byName,
+//                 byName,
+//                 base.baseNames,
+//                 deriveNames
+//             ),
+//             derivedNamesFlags,
+//             derivesByName,
+//         );
+//     }
 
-    get staticDefaultNames() {
-        return this.#joined.staticDefaultNames;
-    }
+//     get names() {
+//         return this.#joined.names;
+//     }
 
-    get staticRequiredNames() {
-        return this.#joined.staticRequiredNames;
-    }
+//     get flags() {
+//         return this.#joined.flags;
+//     }
 
-    get instanceNames() {
-        return this.#joined.instanceNames;
-    }
+//     get baseNames() {
+//         return this.#joined.baseNames;
+//     }
 
-    get instanceDefaultNames() {
-        return this.#joined.instanceDefaultNames;
-    }
+//     get deriveNames() {
 
-    get instanceRequiredNames() {
-        return this.#joined.instanceRequiredNames;
+//     }
 
-    }
+//     get byName() {
+//         return this.#baseFlags.byName;
+//     }
 
-    get flags() {
-        return this.#joined.flags;
-    }
+//     get derivesByName() {
+//         return this.#derives
+//     }
 
-    get baseNames() {
-        return this.#baseFlags.names;
-    }
+//     get baseFlags() {
+//         return this.#baseFlags.flags;
+//     }
 
-    get baseNameSet() {
-        return this.#baseFlags.nameSet;
-    }
+//     clone(): FlagsInterface {
+//         const derives = Object.entries(this.#derivesByName).map((e) => [e[0], e[1].clone()] as [string, FlagsInterface]);
+//         const derivesByName = Object.fromEntries(derives.map((e) => [e[0], e[1].clone()] as [string, FlagsInterface]));
+//         return new FlagsWithDerives(
+//             this.#baseFlags.clone(),
+//             this.#joined.clone(),
+//             derives,
+//             derivesByName
+//         )
+//     }
 
-    get baseFlags() {
-        return this.#baseFlags.flags;
-    }
+//     // isDisjointFrom(other: FlagsInterface) {
+//     //     return this.#joined.isDisjointFrom(other);
+//     // }
 
-    clone(): FlagsInterface {
-        const derives = this.#derives.map((e) => [e[0], e[1].clone()] as [string, FlagsInterface]);
-        const derivesByName = Object.fromEntries(derives.map((e) => [e[0], e[1].clone()] as [string, FlagsInterface]));
-        return new FlagsWithDerives(
-            this.#baseFlags.clone(),
-            this.#joined.clone(),
-            derives,
-            derivesByName
-        )
-    }
+//     // isDisjointFromDerives(derives: FlagsInterface[]) {
+//     //     return this.#joined.isDisjointFromDerives(derives);
+//     // }
 
+//     entries() {
+//         return new FlagsIterator(this.flags, this.names);
+//     }
 
-    isDisjointFrom(other: FlagsInterface) {
-        return this.#joined.isDisjointFrom(other);
-    }
-
-    isDisjointFromDerives(derives: FlagsInterface[]) {
-        return this.#joined.isDisjointFromDerives(derives);
-    }
-
-    entries() {
-        return new FlagsIterator(this.flags, this.names);
-    }
-
-    [Symbol.iterator]() {
-        return this.entries();
-    }
+//     [Symbol.iterator]() {
+//         return this.entries();
+//     }
 
 
 
-}
+// }
 
 interface FlagsIter {
     next(): IteratorResult<[name: string, flags: number]>;

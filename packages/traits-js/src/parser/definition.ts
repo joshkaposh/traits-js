@@ -1,5 +1,6 @@
 import type { Span, TSTupleElement } from "oxc-parser";
 import { Flags, type DerivedFlags, type FlagsInterface } from "./flags";
+import type { TraitObjectExpression } from "./node";
 
 export type UnknownStatic = Span[]
 export type UnknownInstance = Array<{
@@ -7,6 +8,12 @@ export type UnknownInstance = Array<{
     start: number;
     end: number
 }>;
+
+export type TraitDefinitionMeta = {
+    base: FlagsInterface;
+    derives: TSTupleElement[];
+    implementationObject: TraitObjectExpression | null;
+};
 
 export class TraitDefinition {
     #joined: FlagsInterface;
@@ -23,9 +30,11 @@ export class TraitDefinition {
         start: number,
         end: number,
         valid: boolean,
-        flags?: { base: FlagsInterface; derives: TSTupleElement[] },
+        flags: {
+            base: FlagsInterface;
+            derives: TSTupleElement[];
+        },
     ) {
-        flags ??= { base: new Flags([], [], {}), derives: [] };
         this.#base = flags.base;
         this.#joined = flags.base.clone();
         this.#uninitDerives = flags.derives;
@@ -64,7 +73,7 @@ export class TraitDefinition {
     }
 
     join(derives: DerivedFlags) {
-        this.#joined = Flags.withDerives(this.#base, derives);
+        this.#joined = Flags.fromDerives(this.#base, derives);
     }
 
     invalidate() {

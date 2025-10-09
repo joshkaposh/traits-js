@@ -88,8 +88,8 @@ export const TraitError = {
             kind: DEFINITION.InvalidTraitCallArguments
         })
     },
-    MultipleTraitTypeArguments() {
-        return new TraitDefinitionError('trait type arguments can only have one parameter (e.g. `trait<{}>`, `trait<Foo>`, `trait<[Foo, {}]>` are all allowed, but trait<{}, {}> is not)', {
+    InvalidTraitTypeArgument() {
+        return new TraitDefinitionError('type arguments must either be `<{} | Foo>` or `<[Foo, Bar], {} | Baz>`', {
             type: TRAIT_ERROR.TypeDef,
             kind: DEFINITION.InvalidTraitCallArguments
         })
