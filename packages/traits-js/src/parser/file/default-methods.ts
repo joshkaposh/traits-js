@@ -1,11 +1,12 @@
-import type { StaticExport, StaticImport } from "oxc-parser";
+class DefaultMethod {
+
+
+}
 
 export class DefaultMethods {
     #methods: Record<string, {
         start: number;
         end: number;
-        // requiredImports: StaticImport;
-        // requiredExports: StaticExport;
     }>;
 
     constructor() {
@@ -16,14 +17,10 @@ export class DefaultMethods {
         name: string,
         start: number,
         end: number,
-        // requiredImports: StaticImport,
-        // requiredExports: StaticExport
     ) {
         this.#methods[name] = {
             start,
             end,
-            // requiredImports,
-            // requiredExports
         };
     }
 

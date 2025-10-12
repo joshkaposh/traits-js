@@ -1,19 +1,19 @@
-import type { ExportNamedDeclaration, Node, TSTupleElement, TSTypeAliasDeclaration, TSTypeLiteral, TSTypeReference } from "oxc-parser";
+import type { ExportNamedDeclaration, Function, Node, ObjectProperty, ObjectPropertyKind, TSTupleElement, TSTypeAliasDeclaration, TSTypeLiteral, TSTypeQuery, TSTypeReference } from "oxc-parser";
 import { ResolverFactory, type NapiResolveOptions } from "oxc-resolver";
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import pc from 'picocolors';
 import { checkParseResult, resolve } from "./resolver";
-import { isDeclaredInModule, type TraitDeclaration, type TraitAliasDeclaration, type TypeArguments, typeDeclarationSignatures } from "./node";
+import { isDeclaredInModule, type TraitDeclaration, type TraitAliasDeclaration, type TypeArguments, typeDeclarationSignatures, type TraitObjectProperty } from "./node";
 import type { ParsedTraitConfigExport } from "../config";
-import { Flags, type FlagsInterface } from "./flags";
+import { DEFAULT, Flags, INSTANCE, REQUIRED, STATIC } from "./flags";
 import { TraitDefinition, type TraitDefinitionMeta } from "./definition";
-import { TraitFile, type TraitExports, type TraitTypeExports } from "./trait-file";
-import { Registry, type ImportRegistry, type Import, type FileRegistry } from "./registry";
-import { walk } from "oxc-walker";
-import { print, timestamp } from "./helpers";
+import { TraitFile, type TraitExports, type TraitTypeExports } from "./file";
+import { Registry, type ImportRegistry, type Import, type FileRegistry } from "./file/registry";
+import { getCode, print, timestamp } from "./helpers";
 import { Stack, type VisitFn } from "./stack";
 import { TraitError } from "./error";
+import { ScopeTracker, walk } from "oxc-walker";
 
 export type ProjectOptions = {
     cwd: string,
@@ -22,8 +22,6 @@ export type ProjectOptions = {
 };
 
 
-
-type ResolvedRef = TraitDefinition | { name: string; flags: FlagsInterface };
 
 let VERBOSE = false;
 
@@ -113,25 +111,26 @@ export class Project {
             const errors: Record<string, TraitError[]> = {};
             const file = files[i]!;
             file.initialize(self, traits, errors);
+        }
 
+        for (let i = 0; i < files.length; i++) {
+            files[i]!.checkDefinitions();
         }
         console.log(timestamp('initialize', then));
 
     }
 
-    parseType(typeArguments: TypeArguments['params'], code: string, typeDeclaration: TSTypeAliasDeclaration | undefined): TraitDefinitionMeta
-        | TraitError[] {
+    parseType(typeArguments: TypeArguments['params'], code: string, typeDeclaration: TSTypeAliasDeclaration | undefined): Flags | TraitError[] {
         if (!typeArguments.length) {
             return [TraitError.EmptyTraitTypeArguments()];
         } else if (typeArguments.length > 2) {
             return [TraitError.InvalidTraitTypeArgument()];
         }
 
-        const flagsFor = (typeArgument: Node) => {
+        const flagsFor = (typeArgument: Node): Flags<true> | TraitError[] => {
             if (typeArgument.type === 'TSTypeLiteral') {
                 const flags = Flags.fromSignatures(typeDeclarationSignatures(typeArgument)!);
-                return !(flags instanceof Flags) ? [TraitError.CannotConstructFlags()] : flags;
-                // case 'TSTypeReference' 
+                return flags instanceof Flags ? flags : flags.errors;
             } else if (typeArgument.type === 'TSTypeReference') {
                 if (typeArgument.typeName.type !== 'Identifier') {
                     return [TraitError.IdentifierNeLiteral(typeArgument, code)];
@@ -143,6 +142,7 @@ export class Project {
                     && typeDeclaration.typeAnnotation.type === 'TSTypeLiteral'
                 ) {
                     const flags = Flags.fromSignatures(typeDeclarationSignatures(typeDeclaration)!);
+                    // console.log('parse_base (reference to literal): ', `${flags instanceof Flags ? `${flags.get(STATIC)} + ${flags.get(INSTANCE)}` : ''}`);
                     return !(flags instanceof Flags) ? [TraitError.CannotConstructFlags()] : flags;
                 } else {
                     return [TraitError.CannotConstructFlags()];
@@ -161,38 +161,14 @@ export class Project {
                 return [TraitError.EmptyTraitTypeArguments()];
             }
 
-            if (typeArgument.type !== 'TSTupleType') {
-                const f = flagsFor(typeArgument);
-                return f instanceof Flags ? { base: f, derives: [], implementationObject: null } : f;
-            } else {
-                const tupleTypes = typeArgument.elementTypes;
-                if (!tupleTypes.length) {
-                    return [TraitError.CannotConstructFlags()];
-                } else if (tupleTypes.length === 1 && tupleTypes[0]) {
-                    const f = flagsFor(tupleTypes[0]);
-                    return f instanceof Flags ? { base: f, derives: [], implementationObject: null } : f;
-                } else {
-                    const baseType = tupleTypes.at(-1);
-
-                    if (!baseType) {
-                        return [TraitError.CannotConstructFlags()];
-                    }
-
-
-                    const f = flagsFor(baseType);
-                    return f instanceof Flags ? {
-                        base: f,
-                        derives: tupleTypes.slice(0, tupleTypes.length - 1),
-                        implementationObject: null
-                    } : f;
-                    // return !baseType ?
-                    // [TraitError.CannotConstructFlags()] :
-                    // {base: flagsFor(baseType), tupleTypes.slice(0, tupleTypes.length - 1)}
-                }
+            if (typeArgument.type !== 'TSTypeLiteral' && typeArgument.type !== 'TSTypeReference') {
+                return [TraitError.InvalidTraitTypeArgument()];
             }
+            return flagsFor(typeArgument);
+        } else {
+            const [_derivesTuple, baseType] = typeArguments;
+            return flagsFor(baseType);
         }
-
-        return [TraitError.CannotConstructFlags()];
 
     }
 
@@ -205,7 +181,11 @@ export class Project {
             const def = traits[traitName]!;
             const uninitDerives = def.uninitializedDerives;
 
-            if (!uninitDerives.every(t => t.type === 'TSTypeReference')) {
+            if (!uninitDerives.length) {
+                continue
+            }
+
+            if (!uninitDerives.every(t => t.type === 'TSTypeReference' || t.type === 'TSTypeQuery')) {
                 errors[traitName] = [TraitError.InvalidDeriveType()];
                 continue;
             }
@@ -220,10 +200,8 @@ export class Project {
             );
 
             if (derives.valid) {
+                console.log('joining %s with ', traitName, derives.derives.map(d => d.name));
                 def.join(derives.derives);
-                print('parseDerives', `name = ${def.name}`)
-                print('parseDerives', `base = ${JSON.stringify(Object.fromEntries(Object.entries(def.flags.byName).map(([k, v]) => [k, Object.keys(v)])), null, 2)}`)
-                print('parseDerives', `derives = ${JSON.stringify(Object.fromEntries(Object.entries(def.flags.derivesByName).map(([k, v]) => [k, Object.keys(v)])), null, 2)}`)
             } else {
                 console.log('[fail]: %s ', traitName);
                 def.invalidate();
@@ -232,30 +210,162 @@ export class Project {
         }
     }
 
+    #parseInstanceProperties(
+        instanceDefaults: Record<string, TraitObjectProperty>,
+        properties: ObjectPropertyKind[],
+        definition: TraitDefinition,
+        unknownInstance: { type: string; start: number; end: number, name?: string }[],
+        err_requiredInstanceNames: string[]
+    ) {
+        const flags = definition.flags;
+
+        for (let i = 0; i < properties.length; i++) {
+            const instanceProperty = properties[i]!;
+            if (instanceProperty.type === 'SpreadElement') {
+                unknownInstance.push({ type: 'SpreadAssigment', start: instanceProperty.start, end: instanceProperty.end });
+                continue;
+            }
+
+            const key = instanceProperty.key;
+            if (key.type !== 'Identifier') {
+                unknownInstance.push({
+                    type: 'KeyNeIdentifier',
+                    start: instanceProperty.key.start,
+                    end: instanceProperty.key.end,
+                });
+                continue;
+            }
+
+            if (flags.has(key.name, REQUIRED, false)) {
+                err_requiredInstanceNames.push(key.name);
+            } else if (flags.has(key.name, DEFAULT, false)) {
+                instanceDefaults[key.name] = instanceProperty as TraitObjectProperty;
+            } else {
+                unknownInstance.push({ type: 'NotRegisteredInTrait', start: instanceProperty.start, end: instanceProperty.end, name: key.name });
+            }
+        }
+    }
+
+    parseDefinitionImplementation(tracker: ScopeTracker, code: string, definition: TraitDefinition, properties: TraitObjectProperty[]) {
+        const flags = definition.flags;
+
+        const staticDefaults: Record<string, TraitObjectProperty> = {}
+        const instanceDefaults: Record<string, TraitObjectProperty> = {}
+
+        const unknownStatic: ObjectProperty[] = [];
+        const unknownInstance: Array<{
+            type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
+            start: number;
+            end: number
+        }> = [];
+
+        const err_requiredStaticNames: string[] = [];
+        const err_requiredInstanceNames: string[] = [];
+
+        for (let i = 0; i < properties.length; i++) {
+            const property = properties[i]!;
+            const propertyName = property.key.name;
+
+            if (property.value.type === 'FunctionExpression') {
+                if (flags.has(propertyName, REQUIRED, true)) {
+                    err_requiredStaticNames.push(propertyName);
+                    continue
+                } else if (flags.has(propertyName, DEFAULT, true)) {
+                    staticDefaults[propertyName] = property;
+                } else {
+                    unknownStatic.push(property);
+                }
+
+            } else if (propertyName === 'instance' && property.value.type === 'ObjectExpression') {
+                const instanceProperties = property.value.properties;
+                // TODO: fix me
+                this.#parseInstanceProperties(instanceDefaults, instanceProperties, definition, unknownInstance, err_requiredInstanceNames);
+
+            } else {
+                unknownStatic.push(property);
+            }
+        }
+
+        if (
+            unknownStatic.length
+            || unknownInstance.length
+            || err_requiredInstanceNames.length
+            || err_requiredStaticNames.length
+        ) {
+            return;
+        }
+
+        for (const staticName in staticDefaults) {
+            const prop = staticDefaults[staticName]!;
+            const method = prop.value as Function;
+            const rootScope = tracker.getCurrentScope();
+            const ambiguousCallSites: { parent: Node; node: Node; identName: string }[] = [];
+            walk(method.body!, {
+                scopeTracker: tracker,
+                enter(node, parent, ctx) {
+                    if (parent && node.type === 'ThisExpression') {
+                        const currentScope = tracker.getCurrentScope();
+                        if (currentScope === rootScope) {
+                            if (parent.type === 'MemberExpression') {
+                                if (parent.property.type === 'Identifier') {
+                                    const identName = parent.property.name;
+                                    const f = definition.flags.getFlags(identName);
+                                    if (f && f?.length > 1) {
+                                        const obj = parent.object;
+                                        // TODO: check if cast is to a trait
+                                        // TODO: check if casted trait has a method with the proper call signature
+                                        if (obj.type === 'TSAsExpression') {
+                                        } else if (obj.type === 'CallExpression') {
+
+                                        } else {
+                                            ambiguousCallSites.push({ parent: parent, node: node, identName: identName });
+                                            // console.log(`${definition.name} - ${identName} has ${f.length} ambiguous call sites`);
+                                        }
+
+
+                                    }
+                                    // console.log('ident', getCode(code, parent.start, parent.end), f);
+                                }
+                            } else if (parent.type === 'CallExpression') {
+                                // TODO: check if parent is a call to `as`
+                            }
+                            // console.log(parent.type, );
+                        }
+                    }
+                },
+            });
+
+            if (ambiguousCallSites.length) {
+                const names = Array.from(new Set(ambiguousCallSites.map(acs => acs.identName)))
+                console.error(`[${definition.name}.${staticName}] has ${ambiguousCallSites.length} ambiguous calls: ${names}`);
+                for (const callSite of ambiguousCallSites) {
+                    console.log('"%s" %O', getCode(code, callSite.parent.start, callSite.parent.end), [callSite.parent.start, callSite.parent.end]);
+                }
+            }
+        }
+        // console.log(scope.variables.map(v => v.name));
+    }
+
+
     get(path: string): TraitFile | undefined {
         const index = this.#ids[path];
         return index == null ? void 0 : this.#files[index];
     }
 
-    resolveReference(project: Project, file: TraitFile, localTypes: TraitTypeExports, importRegistry: ImportRegistry, lookupName: string): ResolvedRef | undefined {
-        const localType = localTypes[lookupName];
-        if (localType) {
-            const flags = Flags.fromSignatures(localType.typeAnnotation.members);
-            if (!(flags instanceof Flags)) {
-                return;
-            }
-
-            return { name: localType.id.name, flags: flags };
-        } else {
-            const importVar = importRegistry[lookupName];
-            if (importVar) {
-                const actual = project.resolveReferenceFromRequest(project, importVar, file.directory, lookupName);
-                if (actual) {
-                    return actual;
-                }
-            }
-        }
-    }
+    // resolveReference(project: Project, file: TraitFile, traits: Record<string, TraitDefinition>, importRegistry: ImportRegistry, lookupName: string): TraitDefinition | undefined {
+    //     const localTrait = traits[lookupName];
+    //     if (localTrait?.valid) {
+    //         return localTrait;
+    //     } else {
+    //         const importVar = importRegistry[lookupName];
+    //         if (importVar) {
+    //             const actual = project.resolveReferenceFromRequest(project, importVar, file.directory, lookupName);
+    //             if (actual) {
+    //                 return actual;
+    //             }
+    //         }
+    //     }
+    // }
 
     resolveReferenceFromRequest(project: Project, importVar: Import, directory: string, localName: string) {
         const resolver = project.resolver;
@@ -285,40 +395,50 @@ export class Project {
         importTypes: ImportRegistry,
         importVars: ImportRegistry,
         traits: ReadOnlyDict<TraitDefinition>,
-        derives: TSTypeReference[],
+        derives: (TSTypeReference | TSTypeQuery)[],
         path: string
     ) {
 
         const errors: TraitError[] = [];
 
-        if (!derives.every(d => d.type === 'TSTypeReference' && d.typeName.type === 'Identifier')) {
-            console.error('CONSTRUCT ERROR CANNOT PROCEED', derives.map(d => [d.type, d.typeName.type]))
-            errors.push(TraitError.InvalidDeriveType());
-            return { valid: false, errors } as const;
-        }
+        // if (!derives.every(d => d.type === 'TSTypeReference' && d.typeName.type === 'Identifier')) {
+        //     // console.error('CONSTRUCT ERROR CANNOT PROCEED', derives.map(d => [d.type, d.typeName.type]))
+        //     errors.push(TraitError.InvalidDeriveType());
+        //     return { valid: false, errors } as const;
+        // }
 
         const queuedDerives: TraitDefinition[] = [];
         for (let i = 0; i < derives.length; i++) {
             const element = derives[i]!;
+            let lookupName;
             if (element.type === 'TSTypeReference' && element.typeName.type === 'Identifier') {
-                const lookupName = element.typeName.name;
-                if (traits[lookupName]) {
-                    const t = traits[lookupName]!;
-                    queuedDerives.push(t);
-                } else if (importVars[lookupName]) {
-                    const actual = project.resolveReferenceFromRequest(project, importVars[lookupName], path, lookupName);
-                    if (actual && actual.valid) {
-                        queuedDerives.push(actual);
-                    } else {
-                        errors.push(TraitError.RefNotFound(path, lookupName));
-                        break;
-                    }
-                } else if (lookupName in importTypes) {
+                lookupName = element.typeName.name;
 
+            } else if (element.type === 'TSTypeQuery' && element.exprName.type === 'Identifier') {
+                lookupName = element.exprName.name;
+            }
+
+            if (!lookupName) {
+                continue;
+            }
+
+            if (traits[lookupName]) {
+                const t = traits[lookupName]!;
+                queuedDerives.push(t);
+            } else if (importVars[lookupName]) {
+                const actual = project.resolveReferenceFromRequest(project, importVars[lookupName]!, path, lookupName);
+                if (actual && actual.valid) {
+                    queuedDerives.push(actual);
                 } else {
-                    errors.push(TraitError.RefNotFound(path, lookupName))
+                    errors.push(TraitError.RefNotFound(path, lookupName));
                     break;
                 }
+            } else if (lookupName in importTypes) {
+                console.log('Project.resolveDerives - TODO: resolve type');
+
+            } else {
+                errors.push(TraitError.RefNotFound(path, lookupName))
+                break;
             }
         }
 

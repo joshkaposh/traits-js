@@ -1,22 +1,20 @@
-import { instance, trait, type Derive } from 'traits-js';
+import { instance, trait } from 'traits-js';
 import { Foo } from '../foo.trait';
 
-export type FooBar = {
+export const FooBar = trait<{
     FOOBAR: string;
 
     foobar(): void;
-};
+}>({});
 
-export const FooBar = trait<FooBar>({});
-
-export const Baz = trait<[Foo, FooBar, {
+export const Baz = trait<[typeof Foo, typeof FooBar], {
     CONSTANT_BAZ: number;
     baz(): void;
     defaultBaz?(): void;
     [instance]: {
         instanceBaz(): void;
     };
-}]>({
+}>({
     defaultBaz() {
         this.CONSTANT;
         this.CONSTANT_BAZ;
