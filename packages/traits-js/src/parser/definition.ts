@@ -1,6 +1,6 @@
 import type { Span, TSTupleElement } from "oxc-parser";
 import { Flags } from "./flags";
-import type { TraitObjectExpression } from "./node";
+import type { TraitCallExpression, TraitObjectExpression } from "./node";
 export type UnknownStatic = Span[]
 export type UnknownInstance = Array<{
     type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
@@ -17,6 +17,7 @@ export type TraitDefinitionMeta = {
 export class TraitDefinition<Valid extends boolean = boolean> {
     #joined: Flags<Valid>;
     #base: Flags<Valid>;
+    #call_expr: TraitCallExpression;
     #uninitDerives: TSTupleElement[];
 
     #name: string;
@@ -27,7 +28,9 @@ export class TraitDefinition<Valid extends boolean = boolean> {
 
     #valid: boolean;
 
-    constructor(name: string,
+    constructor(
+        call_expr: TraitCallExpression,
+        name: string,
         path: string,
         start: number,
         end: number,
@@ -35,6 +38,7 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         base: Flags<Valid> = new Flags<Valid>(),
         derives: TSTupleElement[] = []
     ) {
+        this.#call_expr = call_expr;
         this.#base = base;
         this.#joined = base.clone();
         this.#uninitDerives = derives;
@@ -73,6 +77,10 @@ export class TraitDefinition<Valid extends boolean = boolean> {
 
     get uninitializedDerives() {
         return this.#uninitDerives;
+    }
+
+    get properties() {
+        return this.#call_expr.arguments[0].properties;
     }
 
     filteredNames(type: number) {

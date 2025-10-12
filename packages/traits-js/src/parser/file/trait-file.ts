@@ -73,7 +73,7 @@ export class TraitFile {
 
     #registry: Registry;
     #scope: Scope;
-    #ScopeTracker: ScopeTracker;
+    #tracker: ScopeTracker;
 
     constructor(result: ParseFileResultResult, registry: Registry) {
         this.#result = result;
@@ -86,7 +86,7 @@ export class TraitFile {
         //     sourceType: 'module'
         // }) : void 0);
         this.#scope = new Scope();
-        this.#ScopeTracker = new ScopeTracker({ preserveExitedScopes: true });
+        this.#tracker = new ScopeTracker({ preserveExitedScopes: true });
         this.traits = {};
         this.#vars = {};
     }
@@ -103,16 +103,20 @@ export class TraitFile {
         return this.#result.name;
     }
 
-    get result() {
-        return this.#result.result;
-    }
-
     get code() {
         return this.#result.originalCode;
     }
 
+    get result() {
+        return this.#result.result;
+    }
+
     get registry() {
         return this.#registry;
+    }
+
+    get tracker() {
+        return this.#tracker;
     }
 
     initialize(project: Project, traits: Record<string, TraitDefinition>, errors: Record<string, TraitError[]>) {
@@ -122,156 +126,156 @@ export class TraitFile {
         project.parseDerives(traits, self.#registry as FileRegistry, self.path);
     }
 
-    checkDefinitions() {
-        const traits = this.traits;
-        for (const traitName in traits) {
-            const definition = traits[traitName]!;
-            const implementationObject = this.implementationObject(traitName)!;
-            const properties = implementationObject.properties;
-            this.#checkImplementation(definition, properties);
-        }
-    }
+    // checkDefinitions() {
+    //     const traits = this.traits;
+    //     for (const traitName in traits) {
+    //         const definition = traits[traitName]!;
+    //         const implementationObject = this.#implementationObject(traitName)!;
+    //         const properties = implementationObject.properties;
+    //         this.#checkImplementation(definition, properties);
+    //     }
+    // }
 
-    #parseInstanceProperties(
-        instanceDefaults: Record<string, TraitObjectProperty>,
-        properties: ObjectPropertyKind[],
-        definition: TraitDefinition,
-        unknownInstance: { type: string; start: number; end: number, name?: string }[],
-        err_requiredInstanceNames: string[]
-    ) {
-        const flags = definition.flags;
+    // #parseInstanceProperties(
+    //     instanceDefaults: Record<string, TraitObjectProperty>,
+    //     properties: ObjectPropertyKind[],
+    //     definition: TraitDefinition,
+    //     unknownInstance: { type: string; start: number; end: number, name?: string }[],
+    //     err_requiredInstanceNames: string[]
+    // ) {
+    //     const flags = definition.flags;
 
-        for (let i = 0; i < properties.length; i++) {
-            const instanceProperty = properties[i]!;
-            if (instanceProperty.type === 'SpreadElement') {
-                unknownInstance.push({ type: 'SpreadAssigment', start: instanceProperty.start, end: instanceProperty.end });
-                continue;
-            }
+    //     for (let i = 0; i < properties.length; i++) {
+    //         const instanceProperty = properties[i]!;
+    //         if (instanceProperty.type === 'SpreadElement') {
+    //             unknownInstance.push({ type: 'SpreadAssigment', start: instanceProperty.start, end: instanceProperty.end });
+    //             continue;
+    //         }
 
-            const key = instanceProperty.key;
-            if (key.type !== 'Identifier') {
-                unknownInstance.push({
-                    type: 'KeyNeIdentifier',
-                    start: instanceProperty.key.start,
-                    end: instanceProperty.key.end,
-                });
-                continue;
-            }
+    //         const key = instanceProperty.key;
+    //         if (key.type !== 'Identifier') {
+    //             unknownInstance.push({
+    //                 type: 'KeyNeIdentifier',
+    //                 start: instanceProperty.key.start,
+    //                 end: instanceProperty.key.end,
+    //             });
+    //             continue;
+    //         }
 
-            if (flags.has(key.name, REQUIRED, false)) {
-                err_requiredInstanceNames.push(key.name);
-            } else if (flags.has(key.name, DEFAULT, false)) {
-                instanceDefaults[key.name] = instanceProperty as TraitObjectProperty;
-            } else {
-                unknownInstance.push({ type: 'NotRegisteredInTrait', start: instanceProperty.start, end: instanceProperty.end, name: key.name });
-            }
-        }
-    }
+    //         if (flags.has(key.name, REQUIRED, false)) {
+    //             err_requiredInstanceNames.push(key.name);
+    //         } else if (flags.has(key.name, DEFAULT, false)) {
+    //             instanceDefaults[key.name] = instanceProperty as TraitObjectProperty;
+    //         } else {
+    //             unknownInstance.push({ type: 'NotRegisteredInTrait', start: instanceProperty.start, end: instanceProperty.end, name: key.name });
+    //         }
+    //     }
+    // }
 
-    #checkImplementation(definition: TraitDefinition, properties: TraitObjectProperty[]) {
-        const flags = definition.flags;
+    // #checkImplementation(definition: TraitDefinition, properties: TraitObjectProperty[]) {
+    //     const flags = definition.flags;
 
-        const staticDefaults: Record<string, TraitObjectProperty> = {}
-        const instanceDefaults: Record<string, TraitObjectProperty> = {}
+    //     const staticDefaults: Record<string, TraitObjectProperty> = {}
+    //     const instanceDefaults: Record<string, TraitObjectProperty> = {}
 
-        const unknownStatic: ObjectProperty[] = [];
-        const unknownInstance: Array<{
-            type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
-            start: number;
-            end: number
-        }> = [];
+    //     const unknownStatic: ObjectProperty[] = [];
+    //     const unknownInstance: Array<{
+    //         type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
+    //         start: number;
+    //         end: number
+    //     }> = [];
 
-        const err_requiredStaticNames: string[] = [];
-        const err_requiredInstanceNames: string[] = [];
+    //     const err_requiredStaticNames: string[] = [];
+    //     const err_requiredInstanceNames: string[] = [];
 
-        for (let i = 0; i < properties.length; i++) {
-            const property = properties[i]!;
-            const propertyName = property.key.name;
+    //     for (let i = 0; i < properties.length; i++) {
+    //         const property = properties[i]!;
+    //         const propertyName = property.key.name;
 
-            if (property.value.type === 'FunctionExpression') {
-                if (flags.has(propertyName, REQUIRED, true)) {
-                    err_requiredStaticNames.push(propertyName);
-                    continue
-                } else if (flags.has(propertyName, DEFAULT, true)) {
-                    staticDefaults[propertyName] = property;
-                } else {
-                    unknownStatic.push(property);
-                }
+    //         if (property.value.type === 'FunctionExpression') {
+    //             if (flags.has(propertyName, REQUIRED, true)) {
+    //                 err_requiredStaticNames.push(propertyName);
+    //                 continue
+    //             } else if (flags.has(propertyName, DEFAULT, true)) {
+    //                 staticDefaults[propertyName] = property;
+    //             } else {
+    //                 unknownStatic.push(property);
+    //             }
 
-            } else if (propertyName === 'instance' && property.value.type === 'ObjectExpression') {
-                const instanceProperties = property.value.properties;
-                // TODO: fix me
-                this.#parseInstanceProperties(instanceDefaults, instanceProperties, definition, unknownInstance, err_requiredInstanceNames);
+    //         } else if (propertyName === 'instance' && property.value.type === 'ObjectExpression') {
+    //             const instanceProperties = property.value.properties;
+    //             // TODO: fix me
+    //             this.#parseInstanceProperties(instanceDefaults, instanceProperties, definition, unknownInstance, err_requiredInstanceNames);
 
-            } else {
-                unknownStatic.push(property);
-            }
-        }
+    //         } else {
+    //             unknownStatic.push(property);
+    //         }
+    //     }
 
-        if (
-            unknownStatic.length
-            || unknownInstance.length
-            || err_requiredInstanceNames.length
-            || err_requiredStaticNames.length
-        ) {
-            return;
-        }
-
-
-        const code = this.code;
-        for (const staticName in staticDefaults) {
-            const prop = staticDefaults[staticName]!;
-            const method = prop.value as Function;
-            const tracker = this.#ScopeTracker;
-            const rootScope = tracker.getCurrentScope();
-            const ambiguousCallSites: { parent: Node; node: Node; identName: string }[] = [];
-            walk(method.body!, {
-                scopeTracker: tracker,
-                enter(node, parent, ctx) {
-                    if (parent && node.type === 'ThisExpression') {
-                        const currentScope = tracker.getCurrentScope();
-                        if (currentScope === rootScope) {
-                            if (parent.type === 'MemberExpression') {
-                                if (parent.property.type === 'Identifier') {
-                                    const identName = parent.property.name;
-                                    const f = definition.flags.getFlags(identName);
-                                    if (f && f?.length > 1) {
-                                        const obj = parent.object;
-                                        // TODO: check if cast is to a trait
-                                        // TODO: check if casted trait has a method with the proper call signature
-                                        if (obj.type === 'TSAsExpression') {
-                                        } else if (obj.type === 'CallExpression') {
-
-                                        } else {
-                                            ambiguousCallSites.push({ parent: parent, node: node, identName: identName });
-                                            // console.log(`${definition.name} - ${identName} has ${f.length} ambiguous call sites`);
-                                        }
+    //     if (
+    //         unknownStatic.length
+    //         || unknownInstance.length
+    //         || err_requiredInstanceNames.length
+    //         || err_requiredStaticNames.length
+    //     ) {
+    //         return;
+    //     }
 
 
-                                    }
-                                    // console.log('ident', getCode(code, parent.start, parent.end), f);
-                                }
-                            } else if (parent.type === 'CallExpression') {
-                                // TODO: check if parent is a call to `as`
-                            }
-                            // console.log(parent.type, );
-                        }
-                    }
-                },
-            });
+    //     const code = this.code;
+    //     for (const staticName in staticDefaults) {
+    //         const prop = staticDefaults[staticName]!;
+    //         const method = prop.value as Function;
+    //         const tracker = this.#ScopeTracker;
+    //         const rootScope = tracker.getCurrentScope();
+    //         const ambiguousCallSites: { parent: Node; node: Node; identName: string }[] = [];
+    //         walk(method.body!, {
+    //             scopeTracker: tracker,
+    //             enter(node, parent, ctx) {
+    //                 if (parent && node.type === 'ThisExpression') {
+    //                     const currentScope = tracker.getCurrentScope();
+    //                     if (currentScope === rootScope) {
+    //                         if (parent.type === 'MemberExpression') {
+    //                             if (parent.property.type === 'Identifier') {
+    //                                 const identName = parent.property.name;
+    //                                 const f = definition.flags.getFlags(identName);
+    //                                 if (f && f?.length > 1) {
+    //                                     const obj = parent.object;
+    //                                     // TODO: check if cast is to a trait
+    //                                     // TODO: check if casted trait has a method with the proper call signature
+    //                                     if (obj.type === 'TSAsExpression') {
+    //                                     } else if (obj.type === 'CallExpression') {
 
-            if (ambiguousCallSites.length) {
-                const names = Array.from(new Set(ambiguousCallSites.map(acs => acs.identName)))
-                console.error(`[${definition.name}.${staticName}] has ${ambiguousCallSites.length} ambiguous calls: ${names}`);
-                for (const callSite of ambiguousCallSites) {
-                    console.log('"%s" %O', getCode(code, callSite.parent.start, callSite.parent.end), [callSite.parent.start, callSite.parent.end]);
-                }
-            }
-        }
-        // console.log(scope.variables.map(v => v.name));
-    }
+    //                                     } else {
+    //                                         ambiguousCallSites.push({ parent: parent, node: node, identName: identName });
+    //                                         // console.log(`${definition.name} - ${identName} has ${f.length} ambiguous call sites`);
+    //                                     }
 
-    #checkAmbiguities(definition: TraitDefinition, propertyName: string, propertyFlags: number) { }
+
+    //                                 }
+    //                                 // console.log('ident', getCode(code, parent.start, parent.end), f);
+    //                             }
+    //                         } else if (parent.type === 'CallExpression') {
+    //                             // TODO: check if parent is a call to `as`
+    //                         }
+    //                         // console.log(parent.type, );
+    //                     }
+    //                 }
+    //             },
+    //         });
+
+    //         if (ambiguousCallSites.length) {
+    //             const names = Array.from(new Set(ambiguousCallSites.map(acs => acs.identName)))
+    //             console.error(`[${definition.name}.${staticName}] has ${ambiguousCallSites.length} ambiguous calls: ${names}`);
+    //             for (const callSite of ambiguousCallSites) {
+    //                 console.log('"%s" %O', getCode(code, callSite.parent.start, callSite.parent.end), [callSite.parent.start, callSite.parent.end]);
+    //             }
+    //         }
+    //     }
+    //     // console.log(scope.variables.map(v => v.name));
+    // }
+
+    // #checkAmbiguities(definition: TraitDefinition, propertyName: string, propertyFlags: number) { }
 
     #collectTraitBindings(
         project: Project,
@@ -284,7 +288,7 @@ export class TraitFile {
         const ast = self.#result.result.program;
         const path = self.#result.path;
 
-        const scopeTracker = self.#ScopeTracker;
+        const scopeTracker = self.#tracker;
 
         const types: TraitTypeExports = {},
             vars: TraitExports = {};
@@ -341,7 +345,7 @@ export class TraitFile {
                 if (args.length !== 1) {
                     definition_errors.push(TraitError.InvalidTraitCallArguments());
                     errors[varName] = definition_errors;
-                    traits[varName] = new TraitDefinition(varName, path, start, end, false);
+                    traits[varName] = new TraitDefinition(call_expr, varName, path, start, end, false);
                     continue;
                 }
 
@@ -351,13 +355,14 @@ export class TraitFile {
                     // console.log("Error parsing base for %s: ", varName, base.map(e => e.message));
 
                     definition_errors.push(...base);
-                    traits[varName] = new TraitDefinition(varName, path, start, end, false)
+                    traits[varName] = new TraitDefinition(call_expr, varName, path, start, end, false)
                     continue;
                 }
 
                 const params = call_expr.typeArguments.params;
                 const derives = params.length === 2 ? params[0].elementTypes : [] as DeriveTupleType['elementTypes'];
                 traits[varName] = new TraitDefinition(
+                    call_expr,
                     varName,
                     path,
                     start,
@@ -377,7 +382,7 @@ export class TraitFile {
         return this.traits[name];
     }
 
-    implementationObject(name: string): TraitObjectExpression | undefined {
+    #implementationObject(name: string): TraitObjectExpression | undefined {
         const varDec = this.#vars[name]?.node;
         if (!varDec) {
             return;

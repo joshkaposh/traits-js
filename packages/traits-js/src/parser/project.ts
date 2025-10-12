@@ -114,8 +114,15 @@ export class Project {
         }
 
         for (let i = 0; i < files.length; i++) {
-            files[i]!.checkDefinitions();
+            const file = files[i]!;
+            const traits = file.traits;
+            for (const traitName in traits) {
+                const trait = traits[traitName]!;
+                self.parseDefinitionImplementation(file.tracker, file.code, trait)
+            }
+
         }
+
         console.log(timestamp('initialize', then));
 
     }
@@ -182,6 +189,8 @@ export class Project {
             const uninitDerives = def.uninitializedDerives;
 
             if (!uninitDerives.length) {
+                console.log('trait = ', traitName);
+
                 continue
             }
 
@@ -200,7 +209,7 @@ export class Project {
             );
 
             if (derives.valid) {
-                console.log('joining %s with ', traitName, derives.derives.map(d => d.name));
+                console.log('trait = %s', traitName, derives.derives.map(d => d.name));
                 def.join(derives.derives);
             } else {
                 console.log('[fail]: %s ', traitName);
@@ -246,8 +255,9 @@ export class Project {
         }
     }
 
-    parseDefinitionImplementation(tracker: ScopeTracker, code: string, definition: TraitDefinition, properties: TraitObjectProperty[]) {
-        const flags = definition.flags;
+    parseDefinitionImplementation(tracker: ScopeTracker, code: string, definition: TraitDefinition) {
+        const flags = definition.flags,
+            properties = definition.properties;
 
         const staticDefaults: Record<string, TraitObjectProperty> = {}
         const instanceDefaults: Record<string, TraitObjectProperty> = {}
