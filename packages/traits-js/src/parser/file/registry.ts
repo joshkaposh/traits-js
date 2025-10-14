@@ -1,4 +1,4 @@
-import type { ImportNameKind, StaticExportEntry } from "oxc-parser";
+import type { Declaration, ImportNameKind, StaticExportEntry } from "oxc-parser";
 
 export type Import = {
     type: ImportNameKind;
@@ -17,6 +17,13 @@ export type ReExport = {
 export type ImportRegistry = Record<string, Import>;
 export type ReExportRegistry = Record<string, ReExport>;
 export type LocalExportRegistry = Record<string, LocalExport>;
+export type DeclarationRegistry<T extends Declaration = Declaration> = Record<string, {
+    node: T;
+    start:
+    number;
+    end: number;
+    references: any[];
+}>;
 
 type RegistryType = { [K in keyof typeof Registry]: ReturnType<typeof Registry[K]> };
 
@@ -82,7 +89,13 @@ export const Registry = {
         return {
             type: 'index',
             types: {} as ReExportRegistry,
-            vars: {} as ReExportRegistry
+            vars: {} as ReExportRegistry,
+            has(name: string) {
+                return name in this.types || name in this.vars;
+            },
+            hasType(name: string) {
+                return name in this.types;
+            }
         } as const;
     },
     File() {
@@ -100,7 +113,20 @@ export const Registry = {
             importTypes: {} as ImportRegistry,
             importVars: {} as ImportRegistry,
             exportTypes: {} as LocalExportRegistry,
-            exportVars: {} as LocalExportRegistry
+            exportVars: {} as LocalExportRegistry,
+            // declarationVars: {} as DeclarationRegistry,
+            // declarationTypes: {} as DeclarationRegistry,
+            has(name: string) {
+                return name in this.importTypes
+                    || name in this.importVars
+                    || name in this.exportTypes
+                    || name in this.exportVars
+            },
+            hasType(name: string) {
+                return name in this.importTypes
+                    || name in this.exportTypes
+            }
+
         } as const
     }
 } as const;

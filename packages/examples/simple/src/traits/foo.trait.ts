@@ -1,7 +1,7 @@
 import { instance, trait } from 'traits-js';
 import { include } from 'traits-js/modifier';
 
-export type Foo = {
+export const Foo = trait<{
     CONSTANT: number;
     reqStaticFoo(): void;
     defaultstaticFoo?(): void;
@@ -10,8 +10,7 @@ export type Foo = {
         defaultInstanceFoo?(): void;
         reqInstanceFoo(): void;
     };
-};
-export const Foo = trait<Foo>({
+}>({
     defaultstaticFoo() {
         this.CONSTANT;
         this.defaultstaticFoo();
@@ -19,9 +18,6 @@ export const Foo = trait<Foo>({
     },
 
     [instance]: {
-        // [include]: {
-        //     defaultInstanceFoo: []
-        // },
         defaultInstanceFoo() {
             this.defaultInstanceFoo();
             this.reqInstanceFoo();

@@ -1,6 +1,6 @@
 import type { Span, TSTupleElement } from "oxc-parser";
 import { Flags } from "./flags";
-import type { TraitCallExpression, TraitObjectExpression } from "./node";
+import type { DeriveTupleType, TraitCallExpression, TraitObjectExpression } from "./node";
 export type UnknownStatic = Span[]
 export type UnknownInstance = Array<{
     type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
@@ -35,25 +35,21 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         start: number,
         end: number,
         valid: boolean,
-        base: Flags<Valid> = new Flags<Valid>(),
-        derives: TSTupleElement[] = []
+        base: Flags<Valid> = new Flags<Valid>()
     ) {
+        console.log('new trait definition: ', name, valid);
+
         this.#call_expr = call_expr;
         this.#base = base;
         this.#joined = base.clone();
-        this.#uninitDerives = derives;
         this.#name = name;
         this.#path = path;
         this.#start = start;
         this.#end = end;
         this.#valid = valid;
+        const params = call_expr.typeArguments.params;
+        this.#uninitDerives = params.length === 2 ? params[1].elementTypes : [] as DeriveTupleType['elementTypes'];
     }
-
-    // static Invalid(name: string, path: string, start: number, end: number) {
-    //     return new TraitDefinition(name, path, start, end, false, { base: new Flags(), derives: [] })
-    // }
-
-    // static Valid(name: string, path: string, start: number, end: number, ) { }
 
     get valid() {
         return this.#valid;
@@ -83,6 +79,12 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         return this.#call_expr.arguments[0].properties;
     }
 
+    #assertValid(propertyName: string) {
+        if (!this.#valid) {
+            throw new Error(`fatal - tried accessing ${propertyName} in ${this.#name} in file ${this.#path}...\nbut ${this.#name} is invalid`)
+        }
+    }
+
     filteredNames(type: number) {
         return this.#joined.names.filter((_, i) => Boolean(this.#joined.flags[i]! & type));
     }
@@ -98,13 +100,13 @@ export class TraitDefinition<Valid extends boolean = boolean> {
     }
 
     join(derives: TraitDefinition[]) {
-        if (!this.#valid) {
-            throw new Error(`join was called on invalid trait ${this.#name} in file ${this.#path}`)
-        }
+        // this.#assertValid('join');
         this.#joined = this.#joined.join(derives);
     }
 
     invalidate() {
+        console.log('invalidated ', this.name);
+
         this.#valid = false;
     }
 }

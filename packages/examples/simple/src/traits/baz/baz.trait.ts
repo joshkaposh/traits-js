@@ -7,14 +7,14 @@ export const FooBar = trait<{
     foobar(): void;
 }>({});
 
-export const Baz = trait<[typeof Foo, typeof FooBar], {
+export const Baz = trait<{
     CONSTANT_BAZ: number;
     baz(): void;
     defaultBaz?(): void;
     [instance]: {
         instanceBaz(): void;
     };
-}>({
+}, [typeof Foo, typeof FooBar]>({
     defaultBaz() {
         this.CONSTANT;
         this.CONSTANT_BAZ;

@@ -34,6 +34,8 @@ export async function resolve(
                 const file = Bun.file(absolutePath);
                 const name = basename(path);
                 const code = await file.text();
+                // TODO: figure out why parseSync doesnt add range
+                // TODO: `collectBindings` replaces every node with itself and a range property
                 result = {
                     name: name,
                     packageJson: resolved.packageJsonPath,
@@ -42,7 +44,9 @@ export async function resolve(
                     originalCode: code,
                     result: parseSync(name, code, {
                         astType: 'ts',
-                        range: true
+                        lang: 'ts',
+                        sourceType: 'module',
+                        range: true,
                     })
                 };
             } else {

@@ -201,9 +201,10 @@ type DefaultInstanceMethods<Base, Derives> = Base extends { [instance]?: infer I
 
 type Self<T> = This<OmitModifiers<T>>;
 
-type DefaultTraitMethods<Base, Derives> = (
-    DefaultMethodsFor<Base> & (DefaultInstanceMethods<Base, Derives>)
-)
+// type Prettify<T> = { [K in keyof T]: T[K] } & {};
+
+type DefaultTraitMethods<Base, Derives> = DefaultMethodsFor<Base> & DefaultInstanceMethods<Base, Derives>
+
 
 type RequiredTraitMethods<Base, Derives> = (
     GetRequireds<Derives & Base>
@@ -226,17 +227,7 @@ type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitRecord = {}
 
 
 type Impl<T, D> = DefaultTraitMethods<T, D> & Self<T & D>;
-
-export function trait<const Base extends TraitRecord>(impl: Impl<Base, {}>): TraitClass<Base, {}>;
-export function trait<
-    const Derives extends TraitClass[],
-    const Base extends TraitRecord,
-    const D extends TraitRecord = GetTraitRecordsFromDerives<Derives>>(impl: Impl<Base, D>): TraitClass<Base, D>
-export function trait<
-    const Base extends TraitRecord,
-    const DeriveTypes extends any[] = [],
-    const D extends TraitRecord = GetTraitRecordsFromDerives<DeriveTypes>
->(impl: Impl<Base, D>): TraitClass<Base, D> {
+export function trait<const Base extends TraitRecord, const DeriveTypes extends any[] = [], const D extends TraitRecord = GetTraitRecordsFromDerives<DeriveTypes>>(impl: Impl<Base, D>): TraitClass<Base, D> {
     return void 0 as unknown as TraitClass<Base, D>;
 }
 
@@ -375,7 +366,7 @@ const Generic2 = trait<{
 });
 
 
-const A = trait<[typeof Generic1, typeof Brander], { a?<const T extends string>(type: T): Branded<T, 'branded-from-a'> }>({
+const A = trait<{ a?<const T extends string>(type: T): Branded<T, 'branded-from-a'> }, [typeof Generic1, typeof Brander]>({
     a<T extends string>(type: T) {
 
         const defaultBrand = this.brand(type);
@@ -387,28 +378,28 @@ const A = trait<[typeof Generic1, typeof Brander], { a?<const T extends string>(
 });
 
 
-const B = trait<[typeof Generic2], { b?<const T extends string>(type: T, brander: Trait<typeof A>): ReturnType<Trait<typeof A>['a']> }>({
+const B = trait<{ b?<const T extends string>(type: T, brander: Trait<typeof A>): ReturnType<Trait<typeof A>['a']> }, [typeof Generic2]>({
     b(type, brander) {
         const obj = this.g({ count: 1 });
         return brander.a(type);
     },
 });
 
-const C = trait<[typeof A], { c?(): void }>({
+const C = trait<{ c?(): void }, [typeof A]>({
     c() {
         const str = this.a('string')
     },
 });
 
 
-const D = trait<[typeof B], { d?(): void }>({
+const D = trait<{ d?(): void }, [typeof B]>({
     d() {
 
     },
 });
 
 
-const E = trait<[typeof C, typeof D], { e?(): void }>({
+const E = trait<{ e?(): void }, [typeof C, typeof D]>({
     e() {
         const o = this.g({ count: 1 });
         const s = this.g('string');
@@ -463,13 +454,13 @@ inject<typeof FooClass, typeof Foo>({
 foo.defInstFoo();
 foo.instFoo();
 
-const Bar = trait<[typeof Foo], {
+const Bar = trait<{
     bar(): void;
     barDef?(): void;
     [instance]?: {
         barDefInst?(): void;
     };
-}>({
+}, [typeof Foo]>({
     barDef() {
         this.FOO;
         this.sayHello('');
@@ -487,7 +478,7 @@ const Bar = trait<[typeof Foo], {
     }
 });
 
-const UsesGenerics = trait<[typeof Generic1, typeof Generic2], { u?(): void }>({
+const UsesGenerics = trait<{ u?(): void }, [typeof Generic1, typeof Generic2]>({
     u() {
         this.g('');
         this.g({ count: 1 });

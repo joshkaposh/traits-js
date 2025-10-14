@@ -15,7 +15,7 @@ export interface DeriveTupleType extends TSTupleType {
 
 
 export interface TypeArguments extends TSTypeParameterInstantiation {
-    params: [BaseTypeArgument] | [DeriveTupleType, BaseTypeArgument];
+    params: [BaseTypeArgument] | [BaseTypeArgument, DeriveTupleType];
 }
 
 export interface TraitObjectProperty extends ObjectProperty {

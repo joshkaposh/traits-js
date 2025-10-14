@@ -1,36 +1,73 @@
-import { instance, trait, type Trait } from "traits-js";
+import { instance, trait, type Trait, type Derive } from "traits-js";
 import { Foo as FooType } from "./foo.trait";
 
-export const Bar = trait<{
+
+export type Obj = { name: string };
+
+export type BarType = {
     requiredStaticBar(): void;
-    defaultStaticBar?(): void;
+    defaultStaticBar?(...obj: Trait<any>[]): void;
     [instance]: {
         reqInstanceBar(): void;
     }
-}>({
-    defaultStaticBar() { },
+};
+
+export function localFunction(obj: object) {
+    console.log(obj);
+}
+
+export function arrowOuterFunction(param: any) {
+
+}
+
+export const arrowOuterObject = {};
+
+export const switchObject = {};
+
+export const Bar = trait<BarType>({
+    defaultStaticBar(obj: Trait<any>, obj2: typeof trait<FooBarBaz>, obj3: Derive<BarType, []>) {
+        const v = {};
+        console.log(v);
+
+        const arrow = () => {
+            arrowOuterFunction(arrowOuterObject);
+        }
+
+
+        switch (true as any) {
+            case '':
+                switchObject;
+                break;
+
+            default:
+                break;
+        }
+
+
+        localFunction(trait);
+    },
     [instance]: {
     }
 });
 
-export const Bar1 = trait<
-    [typeof FooType], {
-        bar1?(): void;
-        bar?<T extends string>(str: T): T;
-    }>({
-        bar(t) {
-            return t;
-        },
-        bar1() { },
-    });
+export type Bar1Type = {
+    bar1?(): void;
+    bar?<T extends string>(str: T): T;
+};
+
+export const Bar1 = trait<Bar1Type, [typeof FooType]>({
+    bar(t) {
+        return t;
+    },
+    bar1() { },
+});
 
 
-export const Bar2 = trait<[typeof Bar, typeof Bar1], { bar2?(): void, bar?(n: number): void }>({
+export const Bar2 = trait<{ bar2?(obj: any): void, bar?(n: number): void }, [typeof Bar, typeof Bar1]>({
     bar2() {
         this.bar1();
-        this.bar2();
         this.requiredStaticBar();
-        this.defaultStaticBar();
+        this.defaultStaticBar({} as never);
     },
     bar() {
         this.bar(0);
@@ -46,10 +83,4 @@ type FooBarBaz<Self extends object = object> = {
     staticRequiredFooBarBaz(): void;
 };
 
-export const FooBarBaz = trait<[typeof FooType, typeof Bar], FooBarBaz>({
-    [instance]: {
-        defaultInstanceFoo() {
-            this.defaultInstanceFoo();
-        },
-    }
-});
+export const FooBarBaz = trait<FooBarBaz, [typeof FooType, typeof Bar]>({});
