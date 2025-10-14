@@ -276,8 +276,12 @@ class EmptyClass {
         const obj = as<typeof Foo, typeof EmptyClass>();
         new obj().m;
         obj.FOO;
+        obj.foo1();
+        obj.foo2();
+        obj.sayHello('');
         new obj().m();
-        new obj().instanceProp
+        new obj().instanceProp;
+        new obj().defInstFoo();
     }
 
     instanceProp = 10;
@@ -322,8 +326,8 @@ function cast<T, U extends T = T>(self: U): Into<T, U> {
     return self as Into<T, U>;
 }
 
-function as<T, C extends ValidClass>(): Merge<C, Class<T>> {
-    return void 0 as unknown as Merge<C, Class<T>>;
+function as<T extends Class<unknown>, C extends ValidClass>(): Merge<C, T> {
+    return void 0 as unknown as Merge<C, T>;
 }
 
 type G1 = Trait<typeof Generic1>;
