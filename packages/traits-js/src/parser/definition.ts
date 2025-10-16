@@ -1,6 +1,8 @@
 import type { Span, TSTupleElement } from "oxc-parser";
 import { Flags } from "./flags";
 import type { DeriveTupleType, TraitCallExpression, TraitObjectExpression } from "./node";
+import type { Reference } from "./file";
+import type { MethodParseResult } from "./project";
 export type UnknownStatic = Span[]
 export type UnknownInstance = Array<{
     type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
@@ -19,14 +21,20 @@ export class TraitDefinition<Valid extends boolean = boolean> {
     #base: Flags<Valid>;
     #call_expr: TraitCallExpression;
     #uninitDerives: TSTupleElement[];
+    #dependencies: {
+        static: Record<string, MethodParseResult>;
+        instance: Record<string, MethodParseResult>
+    };
 
     #name: string;
     #path: string;
+    #id: string;
 
     #start: number;
     #end: number;
 
     #valid: boolean;
+    #initialized: boolean;
 
     constructor(
         call_expr: TraitCallExpression,
@@ -35,24 +43,32 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         start: number,
         end: number,
         valid: boolean,
-        base: Flags<Valid> = new Flags<Valid>()
+        base: Flags<Valid>
     ) {
-        console.log('new trait definition: ', name, valid);
-
         this.#call_expr = call_expr;
         this.#base = base;
         this.#joined = base.clone();
         this.#name = name;
         this.#path = path;
+        this.#id = `${path}::${name}`
         this.#start = start;
         this.#end = end;
         this.#valid = valid;
+        this.#initialized = false;
         const params = call_expr.typeArguments.params;
         this.#uninitDerives = params.length === 2 ? params[1].elementTypes : [] as DeriveTupleType['elementTypes'];
+        this.#dependencies = {
+            static: {},
+            instance: {}
+        };
     }
 
     get valid() {
         return this.#valid;
+    }
+
+    get id() {
+        return this.#id;
     }
 
     get name() {
@@ -79,6 +95,31 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         return this.#call_expr.arguments[0].properties;
     }
 
+    serialize() {
+        return {
+            type: 'Definition',
+            name: this.name,
+            path: this.#path,
+            valid: this.#valid,
+            flags: this.flags.serialize(),
+            dependencies: this.#dependencies
+        }
+    }
+
+    initialize(dependencies: {
+        static: Record<string, MethodParseResult>;
+        instance: Record<string, MethodParseResult>
+    }) {
+        this.#assertValid('initialize');
+
+        if (this.#initialized) {
+            throw new Error('Cannot re-initialize definitions');
+        }
+        this.#dependencies = dependencies;
+
+    }
+
+
     #assertValid(propertyName: string) {
         if (!this.#valid) {
             throw new Error(`fatal - tried accessing ${propertyName} in ${this.#name} in file ${this.#path}...\nbut ${this.#name} is invalid`)
@@ -89,19 +130,42 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         return this.#joined.names.filter((_, i) => Boolean(this.#joined.flags[i]! & type));
     }
 
-    getAmbiguities() {
-        const baseNames = this.#base.names;
-        // const deriveNames = this.#joined.
-        // const names = this.#joined.b;
-        // const flags = this.#joined.flags;
+    // getAmbiguities(result: MethodParseResult) {
+    //     const self = this;
+    //     const flags = self.flags;
+    //     const ambiguousCallSites = result.ambiguousCallSites;
+    //     const derives = flags.derives;
+    //     const traitNames = [];
+    //     const added = new Set();
 
-        // 
+    //     for (const deriveName in derives) {
+    //         const derive = derives[deriveName]!;
+    //         for (const callSite of ambiguousCallSites) {
+    //             if (derive.flags.nameSet.has(callSite.identName)) {
+    //                 if (
+    //                     flags.baseNameSet.has(callSite.identName)
+    //                     && !added.has(self.id)
+    //                 ) {
+    //                     traitNames.push(self.name);
+    //                     added.add(self.id)
+    //                 }
 
-    }
+    //                 if (!added.has(derive.id)) {
+    //                     traitNames.push(derive.name);
+    //                 }
+    //                 added.add(derive.id);
+    //             }
+    //         }
+    //     }
+
+    //     return traitNames;
+    // }
 
     join(derives: TraitDefinition[]) {
         // this.#assertValid('join');
-        this.#joined = this.#joined.join(derives);
+        if (this.#valid) {
+            this.#joined = this.#joined.join(derives);
+        }
     }
 
     invalidate() {

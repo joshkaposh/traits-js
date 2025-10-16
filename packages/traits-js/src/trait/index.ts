@@ -1,6 +1,4 @@
-export type { Trait, Derive, TraitClass } from './types';
-export { trait, inject } from './types';
-export { instance } from './modifier';
+export * from './modifier';
 
-// export { trait } from './define';
-// export { derive } from './derive';
+export type { Trait, Derive, TraitObj, Definition, Impl } from './types';
+export { trait, impl } from './types';

@@ -1,9 +1,18 @@
-import { include, instance, type Modifier, type ModifierRecord } from './modifier';
+import { instance, type include } from "./modifier";
 
 export type MethodRecord = Record<string, (...args: any[]) => any>;
 
-type ConstKey = Uppercase<string>;
+// type ConstKey = Uppercase<string>;
 type ConstType = string | boolean | number | bigint | symbol;
+
+
+
+export type ModifierRecord<T = {}> = {
+    [include]?: Partial<Record<DefaultKeysOf<T>, unknown[]>>
+};
+
+export type Modifier = instance | keyof ModifierRecord
+
 
 type OmitModifiers<T> = Omit<T, Modifier>;
 
@@ -11,7 +20,11 @@ export type ValidClass<A extends any[] = any[], I extends object = object> = new
 
 export type TraitRecord = {
     readonly [key: string]: ConstType | ((...args: any[]) => any);
-    readonly [key: symbol]: ((...args: any[]) => any) | (MethodRecord & {});
+    readonly [key: Uppercase<string>]: ConstType;
+    readonly [key: symbol]: ((...args: any[]) => any) | {
+        [key: string]: (...args: any[]) => any;
+        [key: symbol]: ((...args: any[]) => any) | ModifierRecord;
+    };
 };
 
 /**
@@ -28,12 +41,36 @@ export type TraitRecord = {
  * with the same __method signature__ as described by the trait.
  */
 export type DefaultKeysOf<T, K extends keyof T = keyof T> = keyof {
-    [P in K as Omit<T, P> extends T ? P : never]: T[K];
+    [P in K as Omit<T, P> extends T ? P : never]: T[P];
 };
-type RequiredKeysOf<T, K extends keyof T = keyof T> = keyof {
-    [P in K as Omit<T, P> extends T ? never : P]: T[K];
 
-};
+// type RequiredKeysOf<T, K extends keyof T = keyof T> = keyof {
+//     [P in K as Omit<T, P> extends T ? never : P]: T[K];
+// };
+
+export type Derive<Base, Derives> = RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>;
+
+export type TraitObj<Base extends TraitRecord = any, Derives extends TraitRecord = any> = ((new <T extends Derive<Base, Derives> = Derive<Base, Derives>>(injection?: T) => (
+    NormalizeType<GetInstance<Base & Derives>>
+)
+) & NormalizeType<OmitModifiers<Base & Derives>>) & Self<Base & Derives>;
+
+export type Trait<T> =
+    T extends TraitObj ?
+    T
+    : T extends TraitRecord ? TraitObj<T>
+    : never;
+
+export type Type<T> =
+    T extends TraitObj<infer Base, infer Derives> ? Base & Derives :
+    T extends TraitRecord ? T :
+    never;
+export type Definition<T, D = {}> = DefaultTraitMethods<T, D> & Self<T & D>;
+
+export function trait<const Base extends TraitRecord, const DeriveTypes extends any[] = [], const D extends TraitRecord = GetTraitRecordsFromDerives<DeriveTypes>>(impl: Definition<Base, D>): TraitObj<Base, D> {
+    return unused(impl);
+}
+
 
 
 /**
@@ -51,7 +88,7 @@ type RequiredKeysOf<T, K extends keyof T = keyof T> = keyof {
  *   required(): void;
  * };
  * // impl is now typed as Omit<MyTrait, 'required'>
- * declare function myFn(impl: Impl<MyTrait>):void
+ * declare function myFn(impl: Definition<MyTrait>):void
  * ```
  */
 
@@ -180,23 +217,46 @@ type PartialMethods<Base, Derives> = (
         {}) & PartialsFor<Base>
 ) & Self<Base & Derives>;
 
-type GetInstance<T> = T extends { [instance]?: infer I } ? I : object;
+type GetInstance<T> = T extends { [instance]?: infer I } ? I extends EmptyObject ? {} : I : {};
 
 // TODO: figure out how to exclude `{[instance]:{...}}` in cases where `I` has no default methods
-type DefaultInstanceMethods<Base, Derives> = Base extends { [instance]?: infer I } ?
-    I extends EmptyObject ? {} :
-    //* only include `[instance]: I` if `I` has any optional properties
-    DefaultKeysOf<I> extends infer K extends (keyof I & (string | symbol)) ?
-    {
-        [instance]: DefaultMethodsFor<I, K> & Self<
-            I & (Derives extends { [instance]: infer D } ?
-                D extends EmptyObject ? {} : D :
-                {}
-            )
-        >
-    } :
-    {} :
+type DefaultInstanceMethods<Base, Derives> =
+    Base extends { [instance]?: infer I } ?
+    (
+        I extends EmptyObject ? {} :
+        //* only include `[instance]: I` if `I` has any optional properties
+        DefaultMethodsFor<I> extends EmptyObject ? {} :
+        {
+            [instance]: DefaultMethodsFor<I> & Self<
+                I & GetInstance<Derives>
+            >
+        }
+    ) :
     {};
+
+type DefaultInstanceMethods2<Base, Derives> = PickInstanceIfHasDefaultKeys<Base, Base & Derives>
+// Base extends { [instance]?: infer I } ?
+// (
+//     I extends EmptyObject ? {} :
+//     //* only include `[instance]: I` if `I` has any optional properties
+//     DefaultKeysOf<I> extends infer K extends (keyof I & (string | symbol)) ?
+//     {
+//         [instance]: DefaultMethodsFor<I, K> & Self<
+//             I & GetInstance<Derives>
+//         >
+//     } :
+//     {}
+// ) :
+// {};
+
+
+
+// type Base<T> = T extends TraitObj<infer B> ? B : T extends TraitRecord ? T : never;
+
+declare const fooImpl: PickInstanceIfHasDefaultKeys<GetInstance<Type<typeof Foo>>, Self<GetInstance<Type<typeof Foo>>>>;
+fooImpl.defInstFoo;
+// declare const FooImpl2: DefaultInstanceMethods<{[instance]: {}}, {}>
+// FooImpl2[instance];
 
 
 type Self<T> = This<OmitModifiers<T>>;
@@ -205,110 +265,114 @@ type Self<T> = This<OmitModifiers<T>>;
 
 type DefaultTraitMethods<Base, Derives> = DefaultMethodsFor<Base> & DefaultInstanceMethods<Base, Derives>
 
-
 type RequiredTraitMethods<Base, Derives> = (
     GetRequireds<Derives & Base>
     & InstanceRequireds<Base, Derives>
 )
 
-export type Derive<Base, Derives> = RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>;
 
-export type TraitClass<Base extends TraitRecord = any, Derives extends TraitRecord = any> = ((new <T extends any = RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>>(injection?: T) => (
-    NormalizeType<GetInstance<Base & Derives>>
-)
-) & NormalizeType<OmitModifiers<Base & Derives>>) & Self<Base & Derives>;
 
 type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitRecord = {}> = T extends [infer Current, ...infer Rest] ? GetTraitRecordsFromDerives<Rest, Merged & (
-    Current extends TraitClass<infer Base, infer Derives> ?
+    Current extends TraitObj<infer Base, infer Derives> ?
     Derives & Base :
     Current extends TraitRecord ? Current :
-    {}
+    never
 )> : Merged;
 
 
-type Impl<T, D> = DefaultTraitMethods<T, D> & Self<T & D>;
-export function trait<const Base extends TraitRecord, const DeriveTypes extends any[] = [], const D extends TraitRecord = GetTraitRecordsFromDerives<DeriveTypes>>(impl: Impl<Base, D>): TraitClass<Base, D> {
-    return void 0 as unknown as TraitClass<Base, D>;
+
+type Injection<Trait> = Trait extends TraitObj<infer Base, infer Derives> ? RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives> : 'Error: if you are seeing this, you tried passing a type that was not created from `trait` to `inject`. `inject` may only receive `TraitClass`(s)';
+
+// type Class<T = {}> = (new () => T extends { [instance]: infer I } ? { readonly [K in keyof I]-?: I[K] } : {}) & {
+//     readonly [K in Exclude<keyof T, symbol>]-?: T[K] & {};
+// };
+
+type PickInstance<T> = T extends { [instance]?: infer I } ? OmitModifiers<I> : never;
+
+export type Impl<Target extends ValidClass, TargetTrait extends TraitRecord | TraitObj> = TargetTrait extends TraitObj ?
+    (new (...args: ConstructorParameters<Target>) => InstanceType<Target> & InstanceType<TargetTrait>) & Target & TargetTrait
+    :
+    TargetTrait extends TraitRecord ?
+    (new (...args: ConstructorParameters<Target>) => InstanceType<Target> & PickInstance<TargetTrait>) & Target & TraitObj<TargetTrait>
+    :
+    never;
+
+function unused<T>(..._args: any[]): T {
+    return void 0 as never;
 }
 
+export type Cast<T, U> = keyof U extends keyof T ? U : never;
+export type As<Self extends ValidClass, T extends ValidClass> = Impl<Self, T>;
 
-type NormalizeInner<T> = PickInstanceIfHasDefaultKeys<T> extends -1 ? OmitModifiers<T> : never;
-
-export type Trait<T> = T extends TraitClass<infer B, infer D> ?
-    Required<NormalizeInner<D & B>>
-    : T extends TraitRecord ?
-    Required<NormalizeInner<T>>
-    : never;
-
-
-type Injection<Trait> = Trait extends TraitClass<infer Base, infer Derives> ? Derive<Base, Derives> : 'Error: if you are seeing this, you tried passing a type that was not created from `trait` to `inject`. `inject` may only receive `TraitClass`(s)';
-
-type Class<T> = (new () => T extends { [instance]: infer I } ? { readonly [K in keyof I]-?: I[K] } : {}) & {
-    readonly [K in Exclude<keyof T, symbol>]-?: T[K] & {};
-};
-
-type Constructor<A extends any[], S, I> = (new (...args: A) => I) & S;
-
-// type Merge<Target extends new (...args: any[]) => any, Trait extends new () => any> = (new (...args: ConstructorParameters<Target>) => InstanceType<Target> & InstanceType<Trait>) & Trait;
-type Merge<Target extends ValidClass, Trait extends ValidClass> = Constructor<ConstructorParameters<Target>, Target & Trait, InstanceType<Target> & InstanceType<Trait>>
-export function inject<const C extends ValidClass, const Trait>(type: Injection<Trait>): Merge<C, Class<Trait extends TraitClass<infer B, infer D> ? D & B : never>> {
-    return void 0 as unknown as Merge<C, Class<Trait extends TraitClass<infer B, infer D> ? D & B : never>>;
-    // return void 0 as unknown as Class<Trait extends TraitClass<infer T, infer D> ? D & T : never>;
+export function cast<T, U extends T = T>(): Cast<T, U> {
+    return void 0 as unknown as Cast<T, U>;
 }
 
-class EmptyClass {
-    static staticProp = 5;
-    static {
-        inject<typeof EmptyClass, typeof Foo>({
-            FOO: 1,
-            foo1() {
-            },
-            foo2() {
-
-            },
-            [instance]: {
-                instFoo() { },
-            }
-        })
-    }
-
-    m() {
-        const obj = as<typeof Foo, typeof EmptyClass>();
-        new obj().m;
-        obj.FOO;
-        obj.foo1();
-        obj.foo2();
-        obj.sayHello('');
-        new obj().m();
-        new obj().instanceProp;
-        new obj().defInstFoo();
-    }
-
-    instanceProp = 10;
+export function impl<const Trait, const Self extends ValidClass = ValidClass>(injection: Injection<Trait> | ((self: Self) => Injection<Trait>)): Impl<Self, Trait extends TraitObj<infer B, infer D> ? D & B : never> {
+    return unused(injection);
 }
 
-const MyTraitObject = inject<typeof EmptyClass, typeof Foo>({
-    FOO: 1,
-    foo1() {
-    },
-    foo2() {
-
-    },
+const Foo = trait<{
+    FOO: number;
+    foo1(): void;
+    foo2(): void;
+    sayHello?(name: string): void;
     [instance]: {
-        instFoo() {
+        instFoo(): void;
+        defInstFoo?(): void;
+    }
+}>({
+    sayHello(_name) { },
+    [instance]: {
+        defInstFoo() {
 
         },
     }
 });
 
-MyTraitObject.foo1();
-MyTraitObject.foo2();
-MyTraitObject.sayHello('what');
-MyTraitObject.staticProp;
-new MyTraitObject().defInstFoo();
-new MyTraitObject().instFoo();
-new MyTraitObject().instanceProp;
 
+class EmptyClass {
+    static #staticProp = 5;
+    static staticProp = 5;
+    instanceProp = 10;
+
+    static {
+        const Self = this;
+        const fproper = impl<typeof Foo, typeof EmptyClass>(Self => ({
+            FOO: 1,
+            foo1() {
+                Self.#staticProp;
+            },
+            foo2() { },
+            [instance]: {
+                instFoo() { },
+            }
+        }))
+    }
+
+    // m() {
+    //     const obj = as<typeof EmptyClass, typeof Foo>();
+    //     new obj().m;
+    //     obj.FOO;
+    //     obj.foo1();
+    //     obj.foo2();
+    //     obj.sayHello('');
+    //     new obj().m();
+    //     new obj().instanceProp;
+    //     new obj().defInstFoo();
+    // }
+
+}
+
+const MyTraitObject2 = EmptyClass as As<typeof EmptyClass, typeof Foo>;
+
+MyTraitObject2.foo1();
+MyTraitObject2.foo2();
+MyTraitObject2.sayHello('what');
+MyTraitObject2.staticProp;
+new MyTraitObject2().defInstFoo();
+new MyTraitObject2().instFoo();
+new MyTraitObject2().instanceProp;
 
 type Branded<T, Brand> = T & {
     brand: Brand;
@@ -320,21 +384,14 @@ type NormalizeType<T> = {
 
 // type T = Trait<typeof Generic1>;
 // type U = ThisType<T>;
-type Into<T, U> = keyof U extends keyof T ? U : never;
 
-function cast<T, U extends T = T>(self: U): Into<T, U> {
-    return self as Into<T, U>;
-}
+// function as<T extends ValidClass, C extends ValidClass>(): As<C, T> {
+//     return void 0 as unknown as As<C, T>;
+// }
 
-function as<T extends Class<unknown>, C extends ValidClass>(): Merge<C, T> {
-    return void 0 as unknown as Merge<C, T>;
-}
-
-type G1 = Trait<typeof Generic1>;
-
-type BranderType<T extends string = string> = {
-    BRAND: T;
-    brand?<const S extends string>(str: S): Branded<S, T>;
+type BranderType = {
+    BRAND: string;
+    brand?<const S extends string>(str: S): Branded<S, 'brand'>;
     withBrand?<const S extends string, const B extends string>(str: S, brand: B): Branded<S, B>;
     withBrander?<const S extends string, const B extends Trait<BranderType>>(str: S, brander: B): Branded<S, B['BRAND']>;
 
@@ -343,7 +400,7 @@ type BranderType<T extends string = string> = {
     // }
 };
 
-const Brander = trait<BranderType<'brand'>>({
+const Brander = trait<BranderType>({
     brand<T>(str: T) {
         return str as Branded<T, 'brand'>;
     },
@@ -408,55 +465,19 @@ const E = trait<{ e?(): void }, [typeof C, typeof D]>({
         const o = this.g({ count: 1 });
         const s = this.g('string');
         this.a('string');
-        this.b('string', this);
+        this.b('string', this as unknown as Cast<typeof E, typeof C>);
         this.c();
         this.d();
         this.e();
     },
 });
 
-const Foo = trait<{
-    FOO: number;
-    foo1(): void;
-    foo2(): void;
-    sayHello?(name: string): void;
-    [instance]: {
-        instFoo(): void;
-        defInstFoo?(): void;
-    }
-}>({
-    sayHello(name) { },
-    [instance]: {
-        defInstFoo() {
-
-        },
-    }
-});
 
 const withSymbols = trait<{ [Symbol.iterator]?(): Iterator<any> }>({
     [Symbol.iterator]() {
         return [][Symbol.iterator]();
     }
 })
-
-const foo = new Foo({});
-
-class FooClass { }
-
-inject<typeof FooClass, typeof Foo>({
-    FOO: 1,
-    foo1() { },
-    foo2() { },
-    [instance]: {
-        instFoo() {
-        },
-        defInstFoo() {
-        },
-    }
-})
-
-foo.defInstFoo();
-foo.instFoo();
 
 const Bar = trait<{
     bar(): void;
@@ -488,10 +509,13 @@ const UsesGenerics = trait<{ u?(): void }, [typeof Generic1, typeof Generic2]>({
         this.g({ count: 1 });
         type T = Trait<typeof Generic1>;
         type U = ThisType<T>;
-        const c = cast<Trait<typeof Generic1>>(this);
-
-        // const invalid = cast<Trait<typeof Generic1>>({}).g('string');
-        const valid = cast<Trait<typeof Generic2>>(this).g({ count: 1 });
+        const g1 = cast<typeof Generic1>();
+        g1.g('');
+        const g2 = cast<typeof Generic2>();
+        g2.g({ count: 1 });
+        const brander = cast<typeof Brander>();
+        // brander.BRAND
+        const valid = cast<Trait<typeof Generic2>>().g({ count: 1 });
     },
     // u() {
     //     const obj = this.g({ count: 1 });
@@ -501,12 +525,26 @@ const UsesGenerics = trait<{ u?(): void }, [typeof Generic1, typeof Generic2]>({
     // },
 });
 
+class FooClass { }
 
-type PickInstanceIfHasDefaultKeys<T> = T extends { [instance]?: infer I } ?
-    (keyof I extends (DefaultKeysOf<I> & (string | symbol)) ? I extends EmptyObject ?
-        -1 : I :
-        -1) :
-    -1;
+const FooClassDerivesFooTrait = impl<typeof Foo, typeof FooClass>((self) => ({
+    FOO: 1,
+    foo1() { },
+    foo2() { },
+    [instance]: {
+        instFoo() {
+        },
+        defInstFoo() {
+        },
+    }
+}))
+
+type PickInstanceIfHasDefaultKeys<T, Tself = {}> =
+    T extends EmptyObject ? {} :
+    DefaultMethodsFor<T> extends EmptyObject ?
+    {} :
+    DefaultMethodsFor<T> & Self<Tself>;
+
 
 
 type Case1 = {
@@ -519,7 +557,6 @@ type Case2 = {
     [instance]?: {
 
     }
-
 };
 
 type Case3 = {
@@ -539,12 +576,19 @@ type Case5 = {
     [instance]?: {
         a?(): void;
     }
-
 };
 
-type Test1 = PickInstanceIfHasDefaultKeys<Case1>;
-type Test2 = PickInstanceIfHasDefaultKeys<Case2>;
-type Test3 = PickInstanceIfHasDefaultKeys<Case3>;
+type Case6 = {
+    [instance]?: {
+        a?(): void;
+        b(): void;
+    }
+};
 
-type Test4 = PickInstanceIfHasDefaultKeys<Case4>;
-type Test5 = PickInstanceIfHasDefaultKeys<Case5>;
+type Test1 = PickInstanceIfHasDefaultKeys<GetInstance<Case1>, Case1>;
+type Test2 = PickInstanceIfHasDefaultKeys<GetInstance<Case2>, Case2>;
+type Test3 = PickInstanceIfHasDefaultKeys<GetInstance<Case3>, Case3>;
+
+type Test4 = PickInstanceIfHasDefaultKeys<GetInstance<Case4>, Case4>;
+type Test5 = PickInstanceIfHasDefaultKeys<GetInstance<Case5>, Case5>;
+type Test6 = PickInstanceIfHasDefaultKeys<GetInstance<Case6>, Case6>;

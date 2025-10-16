@@ -2,20 +2,31 @@ import type { ParseFileResultResult } from "../types";
 import { TraitDefinition } from "../definition";
 import { Registry, type DeclarationRegistry } from "./registry";
 import * as eslintScope from 'eslint-scope';
+import type { Span, TSInterfaceDeclaration, TSTypeAliasDeclaration } from "oxc-parser";
 
-export class TraitFile {
+export class TraitFile<R extends Registry = Registry> {
 
     #result: ParseFileResultResult;
 
-
-    #registry: Registry;
+    #registry: R;
     #tracker!: eslintScope.ScopeManager;
-    #vars!: DeclarationRegistry;
-    #traits!: ReadOnlyDict<TraitDefinition>;
 
-    constructor(result: ParseFileResultResult, registry: Registry) {
+    #types: DeclarationRegistry<TSTypeAliasDeclaration | TSInterfaceDeclaration>
+    #vars: DeclarationRegistry;
+    #traits: ReadOnlyDict<TraitDefinition>;
+    #isIndex: boolean;
+
+    constructor(result: ParseFileResultResult, registry: R) {
         this.#result = result;
         this.#registry = registry;
+        this.#isIndex = registry.type === 'index';
+        this.#types = {};
+        this.#vars = {};
+        this.#traits = {};
+    }
+
+    get isIndex() {
+        return this.#isIndex;
     }
 
     get path() {
@@ -59,11 +70,20 @@ export class TraitFile {
     }
 
 
-    addBindings(tracker: eslintScope.ScopeManager, vars: DeclarationRegistry, traits: Record<string, TraitDefinition>) {
-        // console.log('ADD BINDINGS: ', typeof tracker);
+    addBindings(
+        tracker: eslintScope.ScopeManager,
+        types: DeclarationRegistry<TSTypeAliasDeclaration | TSInterfaceDeclaration>,
+        vars: DeclarationRegistry,
+        traits: Record<string, TraitDefinition>
+    ) {
         this.#tracker = tracker;
+        this.#types = types;
         this.#vars = vars;
         this.#traits = traits;
+    }
+
+    loc(name: string): Span | undefined {
+        return this.#types[name] ?? this.#vars[name];
     }
 
     has(name: string) {

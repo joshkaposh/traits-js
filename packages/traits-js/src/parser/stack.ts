@@ -1,5 +1,6 @@
 
-export type VisitFn<T, K> = (frame: T, visited: Set<K>, add: (key: K, data: T) => void) => Promise<void>;
+export type QueueFn<T, K> = (key: K, data: T) => void;
+export type VisitFn<T, K> = (frame: T, visited: Set<K>, add: QueueFn<T, K>) => Promise<void>;
 
 export class Stack<D = any, K extends any = string> {
     #stack: D[];

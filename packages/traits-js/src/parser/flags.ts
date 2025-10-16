@@ -70,7 +70,6 @@ const FLAGS = {
     }
 } as const;
 
-0 << 1;
 export const REQUIRED = 1 << 1;
 export const DEFAULT = 1 << 2;
 export const STATIC = 1 << 3;
@@ -129,19 +128,16 @@ const CONSTANT_VALUE = {
 } as const;
 
 export type NameSet = Record<string, number>;
-
-type FilteredNameCache = Map<number, readonly string[]>;
-
 export class Flags<Valid extends boolean = boolean> {
 
     #isValid!: Valid;
 
     #names: readonly string[];
     #flags: readonly number[];
-    #derives: Record<string, TraitDefinition>;
+    #derives: ReadOnlyDict<TraitDefinition>;
 
-    #baseNames: ReadonlySet<string>;
-    #deriveNames: ReadonlySet<string>;
+    #nameSet: ReadonlySet<string>;
+    #baseNameSet: ReadonlySet<string>;
 
     #static: Record<string, number>;
     #instance: Record<string, number>;
@@ -149,18 +145,18 @@ export class Flags<Valid extends boolean = boolean> {
     #staticDerive: Record<string, number[]>;
     #instanceDerive: Record<string, number[]>;
 
-    #cache: FilteredNameCache;
-    #flagsCache: Map<string, readonly number[]>;
+    #cache: Map<number, readonly string[]>;
+    #flagsCache: Map<string, {
+        flags: readonly number[];
+    }>;
 
-    #ambiguities: Record<string, [name: string, flags: number]>;
 
-    constructor(
-        names: readonly string[] = [],
-        flags: readonly number[] = [],
-        baseNames: ReadonlySet<string> = new Set(),
-        deriveNames: ReadonlySet<string> = new Set(),
-        derives: Record<string, TraitDefinition> = {},
-        ambiguities: Record<string, [name: string, flags: number]> = {}
+    // #ambiguities: Record<string, Record<string, number>>;
+
+    private constructor(
+        names: readonly string[],
+        flags: readonly number[],
+        derives: ReadOnlyDict<TraitDefinition>,
     ) {
         this.#names = names;
         this.#flags = flags;
@@ -170,13 +166,16 @@ export class Flags<Valid extends boolean = boolean> {
         const deriveStatics: Record<string, number[]> = {};
         const deriveInstances: Record<string, number[]> = {};
 
-
+        const baseNameSet = new Set<string>();
+        const nameSet = new Set<string>();
+        // const ambiguities: Record<string, Record<string, number>> = {};
 
         for (let i = 0; i < names.length; i++) {
             const name = names[i]!;
             const flag = flags[i]!;
             const isStatic = flag & STATIC;
             const isDerive = flag & DERIVE;
+            nameSet.add(name);
             if (isStatic) {
                 if (isDerive) {
                     if (!deriveStatics[name]) {
@@ -185,6 +184,7 @@ export class Flags<Valid extends boolean = boolean> {
                     deriveStatics[name].push(flag);
 
                 } else {
+                    baseNameSet.add(name);
                     baseStatics[name] = flag;
                 }
             } else {
@@ -194,6 +194,7 @@ export class Flags<Valid extends boolean = boolean> {
                     }
                     deriveInstances[name].push(flag);
                 } else {
+                    baseNameSet.add(name);
                     baseInstances[name] = flag;
                 }
             }
@@ -205,12 +206,14 @@ export class Flags<Valid extends boolean = boolean> {
         this.#instance = baseInstances;
         this.#staticDerive = deriveStatics;
         this.#instanceDerive = deriveInstances;
-        this.#baseNames = baseNames;
-        this.#deriveNames = deriveNames;
-        this.#ambiguities = ambiguities;
+        this.#nameSet = nameSet;
+        this.#baseNameSet = baseNameSet;
+        // this.#ambiguities = ambiguities;
         this.#cache = new Map();
         this.#flagsCache = new Map();
     }
+
+    static readonly empty = new Flags([], [], {});
 
     static fromSignatures(signatures: TSSignature[]): Flags<true> | { errors: TraitError[]; signatures: TSSignature[] } {
         const names: string[] = [];
@@ -249,8 +252,6 @@ export class Flags<Valid extends boolean = boolean> {
                 && signature.typeAnnotation
             ) {
                 const annot = signature.typeAnnotation.typeAnnotation;
-
-
                 //! INSTANCE
                 if (
                     annot.type === 'TSTypeLiteral'
@@ -291,10 +292,10 @@ export class Flags<Valid extends boolean = boolean> {
         return errors.length || unknowns.length ? { errors, signatures } : new Flags(
             names,
             flags,
-            baseNames,
-            new Set()
+            {}
         );
     }
+
 
     get isValid() {
         return this.#isValid;
@@ -304,23 +305,35 @@ export class Flags<Valid extends boolean = boolean> {
         return this.#names;
     }
 
+    get nameSet() {
+        return this.#nameSet;
+    }
+
+    get baseNameSet() {
+        return this.#baseNameSet;
+    }
+
     get flags() {
         return this.#flags;
     }
 
-    get baseNames() {
-        return this.#baseNames;
+    get derives() {
+        return this.#derives;
     }
 
-    get deriveNames() {
-        return this.#deriveNames;
+    serialize(): any {
+        return {
+            names: this.#names,
+            flags: this.#flags,
+            derives: Object.fromEntries(Object.entries(this.#derives).map(([id, def]) => [id, def!.serialize()])),
+        }
     }
 
     join<V extends boolean>(derives: TraitDefinition[]): Flags<V> {
         const deriveNames = derives.flatMap(d => d.flags.names);
         const names = structuredClone(this.#names).concat(deriveNames);
         const flags = structuredClone(this.#flags).concat(derives.flatMap(d => d.flags.flags));
-        return new Flags(names, flags, this.#baseNames, new Set(deriveNames), derives.reduce((acc, x) => {
+        return new Flags(names, flags, derives.reduce((acc, x) => {
             acc[x.name] = x;
             return acc;
         }, Object.create(null)))
@@ -340,31 +353,15 @@ export class Flags<Valid extends boolean = boolean> {
 
     getFlags(name: string) {
         if (this.#flagsCache.has(name)) {
-            return this.#flagsCache.get(name)
+            return this.#flagsCache.get(name);
         } else {
             const flags = this.#flags;
             const names = this.#names;
-            const filteredFlags = flags.filter((_, i) => names[i]! === name) as ReadonlyArray<number>;
+            const filteredFlags = { flags: flags.filter((_, i) => names[i]! === name) };
             this.#flagsCache.set(name, filteredFlags);
             return filteredFlags;
         }
     }
-
-    // flagsOf(name: string) {
-    //     const flags = [];
-    //     if (!(name in this.#staticDerive) && !(name in this.#instanceDerive)) {
-
-    //     }
-    //     if (this.#static[name]) {
-    //         flags.push(this.#static[name])
-    //     }
-
-    //     return (
-    //         (this.#static[name] ?? this.#staticDerive[name])
-    //         ?? (this.#instance[name] ?? this.#instanceDerive[name])
-    //         ?? 0
-    //     );
-    // }
 
     has(name: string, flag: number, isStatic: boolean) {
         if (isStatic) {
@@ -384,8 +381,6 @@ export class Flags<Valid extends boolean = boolean> {
         return new Flags(
             this.#names,
             this.#flags,
-            this.#baseNames,
-            this.#deriveNames,
             this.#derives,
         );
     }
