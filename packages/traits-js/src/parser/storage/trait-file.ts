@@ -1,13 +1,13 @@
 import type { ParseFileResultResult } from "../types";
-import { TraitDefinition } from "../definition";
+import { TraitDefinition } from ".";
 import { Registry, type DeclarationRegistry, type FileRegistry, type Reference } from "./registry";
 import * as eslintScope from 'eslint-scope';
 import { visitorKeys, type Function, type ObjectProperty, type ObjectPropertyKind, type Span, type TSInterfaceDeclaration, type TSTypeAliasDeclaration } from "oxc-parser";
-import { TraitError } from "../error";
+import { TraitError } from "../errors";
 import { walk } from "oxc-walker";
 import { isDeclaredInModule, type TraitAliasDeclaration, type TraitCallExpression, type TraitObjectProperty, type TypeArguments } from "../node";
 import { TRAIT_FN_NAME } from "../constants";
-import { DEFAULT, Flags, REQUIRED } from "../flags";
+import { DEFAULT, Flags, REQUIRED } from "./flags";
 import type { MethodParseResult, Project } from "../project";
 import { addTypeRef, createFilteredExportOrImportNames } from "../helpers";
 

@@ -1,6 +1,6 @@
-import { Visitor as OxcVisitor, type Node, type Program, type VisitorObject } from 'oxc-parser';
+import { Visitor as OxcVisitor, type Node, type Program } from 'oxc-parser';
 import { isDeclaredInModule, type TraitAliasDeclaration } from './node';
-import type { DeclarationRegistry, FileRegistry, TraitFile } from './file';
+import type { FileRegistry } from './storage';
 
 class ModuleDeclaration {
     #visitor: OxcVisitor;

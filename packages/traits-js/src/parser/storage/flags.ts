@@ -1,8 +1,8 @@
 import type { Class, Node, TSSignature } from "oxc-parser";
-import type { TraitDefinition } from "./definition";
-import { TraitError } from "./error";
-import type { DeclarationRegistry } from "./file";
-import { typeDeclarationSignatures, type TraitAliasDeclaration } from "./node";
+import type { TraitDefinition } from "./meta";
+import { TraitError } from "../errors";
+import type { DeclarationRegistry } from "../file";
+import { typeDeclarationSignatures, type TraitAliasDeclaration } from "../node";
 
 // export type SerializedFlags = `${string}:${number}`;
 

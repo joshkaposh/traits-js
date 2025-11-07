@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { basename, normalize, dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import type { ResolverFactory } from "oxc-resolver";
 import type { ParseFileResult, ParseFileResultResult } from "./types";
 import { parseSync } from 'oxc-parser';

@@ -1,14 +1,14 @@
 import { Scope, ScopeManager, analyze } from 'eslint-scope';
 import { visitorKeys, type Function, type ObjectProperty, type ObjectPropertyKind } from "oxc-parser";
 import { walk } from "oxc-walker";
-import { TraitDefinition } from "./definition";
-import type { DeclarationRegistry, FileRegistry, Reference } from "./file/registry";
-import { TraitError } from "./error";
+import { TraitDefinition } from "./storage";
+import type { DeclarationRegistry, FileRegistry, Reference } from "./storage/registry";
+import { TraitError } from "./errors";
 import { isDeclaredInModule, type TraitAliasDeclaration, type TraitCallExpression, type TraitObjectProperty, type TypeArguments } from "./node";
 import { TRAIT_FN_NAME } from "./constants";
-import { DEFAULT, Flags, REQUIRED } from "./flags";
+import { DEFAULT, Flags, REQUIRED } from "./storage/flags";
 import { addTypeRef, createFilteredExportOrImportNames } from "./helpers";
-import type { TraitFile } from "./file";
+import type { TraitFile } from "./storage/trait-file";
 import type { MethodParseResult, Project } from "./project";
 
 

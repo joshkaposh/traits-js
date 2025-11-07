@@ -3,14 +3,14 @@ import { ResolverFactory, type NapiResolveOptions } from "oxc-resolver";
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import pc from 'picocolors';
-import { checkParseResult, resolve } from "./resolver";
+import { checkParseResult, resolve } from "./resolve";
 import type { ParsedTraitConfigExport } from "../config";
-import { TraitDefinition } from "./definition";
-import { TraitFile } from "./file";
-import { Registry, type ImportRegistry, type Import, type FileRegistry, type Reference } from "./file/registry";
+import { TraitDefinition } from "./storage";
+import { TraitFile } from "./storage/trait-file";
+import { Registry, type ImportRegistry, type Import, type FileRegistry, type Reference } from "./storage/registry";
 import { print, timestamp } from "./helpers";
 import { Stack, type VisitFn } from "./stack";
-import { TraitError } from "./error";
+import { TraitError } from "./errors";
 import { collectBindings, parseDefinitionImplementation, parseDerives } from "./parser";
 
 export type ProjectOptions = {
