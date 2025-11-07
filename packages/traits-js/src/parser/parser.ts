@@ -1,113 +1,15 @@
-import type { ParseFileResultResult } from "../types";
-import { TraitDefinition } from "../definition";
-import { Registry, type DeclarationRegistry, type FileRegistry, type Reference } from "./registry";
-import * as eslintScope from 'eslint-scope';
-import { visitorKeys, type Function, type ObjectProperty, type ObjectPropertyKind, type Span, type TSInterfaceDeclaration, type TSTypeAliasDeclaration } from "oxc-parser";
-import { TraitError } from "../error";
+import { Scope, ScopeManager, analyze } from 'eslint-scope';
+import { visitorKeys, type Function, type ObjectProperty, type ObjectPropertyKind } from "oxc-parser";
 import { walk } from "oxc-walker";
-import { isDeclaredInModule, type TraitAliasDeclaration, type TraitCallExpression, type TraitObjectProperty, type TypeArguments } from "../node";
-import { TRAIT_FN_NAME } from "../constants";
-import { DEFAULT, Flags, REQUIRED } from "../flags";
-import type { MethodParseResult, Project } from "../project";
-import { addTypeRef, createFilteredExportOrImportNames } from "../helpers";
-
-
-
-export class TraitFile<R extends Registry = Registry> {
-
-    #result: ParseFileResultResult;
-
-    #registry: R;
-    #tracker!: eslintScope.ScopeManager;
-
-    #types: DeclarationRegistry<TSTypeAliasDeclaration | TSInterfaceDeclaration>
-    #vars: DeclarationRegistry;
-    #traits: ReadOnlyDict<TraitDefinition>;
-    #isIndex: boolean;
-
-    constructor(result: ParseFileResultResult, registry: R) {
-        this.#result = result;
-        this.#registry = registry;
-        this.#isIndex = registry.type === 'index';
-        this.#types = {};
-        this.#vars = {};
-        this.#traits = {};
-    }
-
-    get isIndex() {
-        return this.#isIndex;
-    }
-
-    get path() {
-        return this.#result.path;
-    }
-
-    get directory() {
-        return this.#result.directory;
-    }
-
-    get name() {
-        return this.#result.name;
-    }
-
-    get code() {
-        return this.#result.originalCode;
-    }
-
-    get module() {
-        return this.#result.result.module;
-    }
-
-    get ast() {
-        return this.#result.result.program;
-    }
-
-    get registry() {
-        return this.#registry;
-    }
-
-    get tracker() {
-        return this.#tracker;
-    }
-
-    get traits() {
-        return this.#traits;
-    }
-
-    get vars() {
-        return this.#vars;
-    }
-
-
-    addBindings(
-        tracker: eslintScope.ScopeManager,
-        types: DeclarationRegistry<TSTypeAliasDeclaration | TSInterfaceDeclaration>,
-        vars: DeclarationRegistry,
-        traits: Record<string, TraitDefinition>
-    ) {
-        this.#tracker = tracker;
-        this.#types = types;
-        this.#vars = vars;
-        this.#traits = traits;
-    }
-
-    loc(name: string): Span | undefined {
-        return this.#types[name] ?? this.#vars[name];
-    }
-
-    has(name: string) {
-        return this.#registry.has(name)
-    }
-
-    hasType(name: string) {
-        return this.#registry.hasType(name);
-    }
-
-    trait(name: string) {
-        return this.traits[name];
-    }
-
-}
+import { TraitDefinition } from "./definition";
+import type { DeclarationRegistry, FileRegistry, Reference } from "./file/registry";
+import { TraitError } from "./error";
+import { isDeclaredInModule, type TraitAliasDeclaration, type TraitCallExpression, type TraitObjectProperty, type TypeArguments } from "./node";
+import { TRAIT_FN_NAME } from "./constants";
+import { DEFAULT, Flags, REQUIRED } from "./flags";
+import { addTypeRef, createFilteredExportOrImportNames } from "./helpers";
+import type { TraitFile } from "./file";
+import type { MethodParseResult, Project } from "./project";
 
 
 type CheckMethodResult = {
@@ -124,7 +26,7 @@ type CheckMethodResult = {
     }[];
 }
 
-function collectBindings(
+export function collectBindings(
     file: TraitFile,
     traits: Record<string, TraitDefinition>,
     errors: Record<string, TraitError[]>
@@ -143,7 +45,7 @@ function collectBindings(
     });
 
 
-    const tracker = eslintScope.analyze(ast as any, {
+    const tracker = analyze(ast as any, {
         childVisitorKeys: visitorKeys,
         ecmaVersion: 2022,
         sourceType: 'module',
@@ -246,33 +148,8 @@ function collectBindings(
     return { tracker, types, vars };
 }
 
-function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TraitAliasDeclaration>): Flags | TraitError[] {
-    if (!typeArguments.length) {
-        console.log('#parseType: no type arguments');
 
-        return [TraitError.EmptyTraitTypeArguments()];
-    } else if (typeArguments.length > 2) {
-        console.log('#parseType: type arguments length greater than 2');
-        return [TraitError.InvalidTraitTypeArgument()];
-    }
-
-    if (typeArguments.length === 1) {
-        const typeArgument = typeArguments[0];
-        if (!typeArgument) {
-            return [TraitError.EmptyTraitTypeArguments()];
-        }
-
-        if (typeArgument.type !== 'TSTypeLiteral' && typeArgument.type !== 'TSTypeReference') {
-            return [TraitError.InvalidTraitTypeArgument()];
-        }
-        return Flags.tryFrom(types, code, typeArgument);
-    } else {
-        return Flags.tryFrom(types, code, typeArguments[0]);
-    }
-
-}
-
-function parseDerives(project: Project, { traits, registry, path }: TraitFile) {
+export function parseDerives(project: Project, { traits, registry, path }: TraitFile) {
     const { importTypes, importVars } = registry as FileRegistry;
 
     const errors: Record<string, TraitError[]> = {};
@@ -312,7 +189,34 @@ function parseDerives(project: Project, { traits, registry, path }: TraitFile) {
     }
 }
 
-function parseDefinitionImplementation({ tracker, registry }: TraitFile<FileRegistry>, definition: TraitDefinition) {
+function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TraitAliasDeclaration>): Flags | TraitError[] {
+    if (!typeArguments.length) {
+        console.log('#parseType: no type arguments');
+
+        return [TraitError.EmptyTraitTypeArguments()];
+    } else if (typeArguments.length > 2) {
+        console.log('#parseType: type arguments length greater than 2');
+        return [TraitError.InvalidTraitTypeArgument()];
+    }
+
+    if (typeArguments.length === 1) {
+        const typeArgument = typeArguments[0];
+        if (!typeArgument) {
+            return [TraitError.EmptyTraitTypeArguments()];
+        }
+
+        if (typeArgument.type !== 'TSTypeLiteral' && typeArgument.type !== 'TSTypeReference') {
+            return [TraitError.InvalidTraitTypeArgument()];
+        }
+        return Flags.tryFrom(types, code, typeArgument);
+    } else {
+        return Flags.tryFrom(types, code, typeArguments[0]);
+    }
+
+}
+
+
+export function parseDefinitionImplementation({ tracker, registry }: TraitFile<FileRegistry>, definition: TraitDefinition) {
     const flags = definition.flags,
         properties = definition.properties,
         err_requiredStaticNames: string[] = [],
@@ -420,7 +324,7 @@ function parseTraitInstanceProperties(
     }
 }
 
-function parseMethodDependencies(tracker: eslintScope.ScopeManager, registry: FileRegistry, definition: TraitDefinition, staticProps: Record<string, ObjectProperty>, instanceProps: Record<string, TraitObjectProperty>) {
+function parseMethodDependencies(tracker: ScopeManager, registry: FileRegistry, definition: TraitDefinition, staticProps: Record<string, ObjectProperty>, instanceProps: Record<string, TraitObjectProperty>) {
     const staticDependencies: Record<string, MethodParseResult> = {};
     const instanceDependencies: Record<string, MethodParseResult> = {};
 
@@ -539,7 +443,7 @@ function parseMethodDependencies(tracker: eslintScope.ScopeManager, registry: Fi
 function checkMethod(
     registry: FileRegistry,
     definition: TraitDefinition,
-    scope: eslintScope.Scope,
+    scope: Scope,
     method: Function
 ): CheckMethodResult {
     const ambiguousCallSites: { start: number; end: number; identName: string }[] = [];
@@ -623,39 +527,39 @@ function checkMethod(
     };
 }
 
-function parseImplementationImplementation({ tracker, registry }: TraitFile<FileRegistry>, definition: TraitDefinition) {
-    const flags = definition.flags,
-        properties = definition.properties,
-        err_missingStaticNames: string[] = [],
-        err_missingInstanceNames: string[] = [],
-        props = parseTraitProperties(
-            properties,
-            (name, isStatic) => {
-                const valid = flags.has(name, REQUIRED, isStatic);
-                if (!valid) {
-                    if (flags.nameSet.has(name)) {
-                        if (isStatic) {
-                            err_missingStaticNames.push(name)
-                        } else {
-                            err_missingInstanceNames.push(name);
-                        }
-                    }
+// function parseImplementationImplementation({ tracker, registry }: TraitFile<FileRegistry>, definition: TraitDefinition) {
+//     const flags = definition.flags,
+//         properties = definition.properties,
+//         err_missingStaticNames: string[] = [],
+//         err_missingInstanceNames: string[] = [],
+//         props = parseTraitProperties(
+//             properties,
+//             (name, isStatic) => {
+//                 const valid = flags.has(name, REQUIRED, isStatic);
+//                 if (!valid) {
+//                     if (flags.nameSet.has(name)) {
+//                         if (isStatic) {
+//                             err_missingStaticNames.push(name)
+//                         } else {
+//                             err_missingInstanceNames.push(name);
+//                         }
+//                     }
 
-                }
-                return valid;
-            }
-        );
+//                 }
+//                 return valid;
+//             }
+//         );
 
-    if (
-        !props.valid
-        || err_missingInstanceNames.length
-        || err_missingStaticNames.length
-    ) {
-        return;
-    }
+//     if (
+//         !props.valid
+//         || err_missingInstanceNames.length
+//         || err_missingStaticNames.length
+//     ) {
+//         return;
+//     }
 
-    const dependencies = parseMethodDependencies(tracker, registry, definition, props.staticProps, props.instanceProps);
-    if (dependencies && definition.valid) {
-        definition.initialize(dependencies)
-    }
-}
+//     const dependencies = parseMethodDependencies(tracker, registry, definition, props.staticProps, props.instanceProps);
+//     if (dependencies && definition.valid) {
+//         definition.initialize(dependencies)
+//     }
+// }

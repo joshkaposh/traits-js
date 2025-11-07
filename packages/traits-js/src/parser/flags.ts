@@ -1,6 +1,8 @@
-import type { Class, TSSignature } from "oxc-parser";
+import type { Class, Node, TSSignature } from "oxc-parser";
 import type { TraitDefinition } from "./definition";
 import { TraitError } from "./error";
+import type { DeclarationRegistry } from "./file";
+import { typeDeclarationSignatures, type TraitAliasDeclaration } from "./node";
 
 // export type SerializedFlags = `${string}:${number}`;
 
@@ -214,6 +216,36 @@ export class Flags<Valid extends boolean = boolean> {
     }
 
     static readonly empty = new Flags([], [], {});
+
+    static tryFrom(types: DeclarationRegistry<TraitAliasDeclaration>, code: string, typeArgument: Node): Flags<true> | TraitError[] {
+        if (typeArgument.type === 'TSTypeLiteral') {
+            const flags = Flags.fromSignatures(typeDeclarationSignatures(typeArgument)!);
+            return flags instanceof Flags ? flags : flags.errors;
+        } else if (typeArgument.type === 'TSTypeReference') {
+            if (typeArgument.typeName.type !== 'Identifier') {
+                return [TraitError.IdentifierNeLiteral(typeArgument, code)];
+            } else {
+                const typeDeclaration = types[typeArgument.typeName.name]?.node;
+                if (
+                    // e.g trait<Foo>
+                    // this type is a reference for the trait type alias declaration,
+                    // so we can retrieve it and parse it directly
+                    typeDeclaration?.typeAnnotation.type === 'TSTypeLiteral'
+                ) {
+                    const flags = Flags.fromSignatures(typeDeclarationSignatures(typeDeclaration)!);
+                    // console.log('parse_base (reference to literal): ', `${flags instanceof Flags ? `${flags.get(STATIC)} + ${flags.get(INSTANCE)}` : ''}`);
+                    return !(flags instanceof Flags) ? [TraitError.CannotConstructFlags()] : flags;
+                } else {
+                    return [TraitError.CannotConstructFlags()];
+                    // TODO: parse 
+                    // const flags = self.#parseTraitTypeArgumentReference(project, self, traitName, self.#types, typeArgument, typeDeclaration);
+                    // return flags ?? [TraitError.CannotConstructFlags()];
+                }
+            }
+        } else {
+            return [TraitError.CannotConstructFlags()];
+        }
+    }
 
     static fromSignatures(signatures: TSSignature[]): Flags<true> | { errors: TraitError[]; signatures: TSSignature[] } {
         const names: string[] = [];

@@ -16,7 +16,14 @@ export class Stack<D = any, K extends any = string> {
         return this.#stack.length;
     }
 
-    static async dfs<T, K>(stack: Stack<T, K>, visit: (frame: T, visited: Set<K>, add: (key: K, data: T) => void) => Promise<void>) {
+    static async dfs<T, K>(
+        stack: Stack<T, K>,
+        visit: (
+            frame: T,
+            visited: Set<K>,
+            add: (key: K, data: T) => void
+        ) => Promise<void>
+    ) {
         const ids = stack.#ids;
         const frames = stack.#stack;
         const queuedFrames: T[] = [];

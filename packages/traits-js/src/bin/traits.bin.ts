@@ -18,6 +18,6 @@ const project = new Project({
 });
 
 console.log('Starting traits register...\n');
-await project.addSourceFiles(await project.createStack());
+await project.findAddSourceFiles(await project.createStack());
 
 process.exit(0);

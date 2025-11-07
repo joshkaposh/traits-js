@@ -1,1 +1,1 @@
-export * from './trait';
+export * from './lib';

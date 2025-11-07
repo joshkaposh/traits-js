@@ -1,6 +1,7 @@
 import { instance, trait } from 'traits-js';
 import { Foo } from '../foo.trait';
 
+export type FooBar = typeof FooBar;
 export const FooBar = trait<{
     FOOBAR: string;
 
@@ -13,17 +14,26 @@ export const Baz = trait<{
     defaultBaz?(): void;
     [instance]: {
         instanceBaz(): void;
+        defInstanceBaz?(): void;
     };
-}, [typeof Foo, typeof FooBar]>({
+}, [typeof Foo, FooBar]>({
     defaultBaz() {
         this.CONSTANT;
         this.CONSTANT_BAZ;
+        this.foobar();
         this.defaultBaz();
         this.reqStaticFoo();
         this.defaultBaz();
         this.baz();
     },
     [instance]: {
-        defaultInstanceFoo() { },
+        defInstanceBaz() {
+            this.defaultInstanceFoo();
+            this.reqInstanceFoo();
+            this.defInstanceBaz();
+            this.instanceBaz();
+        },
     }
 });
+
+

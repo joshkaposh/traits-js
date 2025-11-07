@@ -1,4 +1,5 @@
 import type { Declaration, ImportNameKind, StaticExportEntry } from "oxc-parser";
+import type { TraitAliasDeclaration } from "../node";
 
 export type Import = {
     type: ImportNameKind;
@@ -70,6 +71,8 @@ export const Registry = {
             importTypes: {} as ImportRegistry,
             importVars: {} as ImportRegistry,
             exportTypes: {} as LocalExportRegistry,
+            types: {} as DeclarationRegistry<TraitAliasDeclaration>,
+            vars: {} as DeclarationRegistry,
             exportVars: {} as LocalExportRegistry,
             has(name: string) {
                 return name in this.importTypes

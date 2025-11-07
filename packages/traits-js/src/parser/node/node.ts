@@ -30,7 +30,7 @@ export function variableName(variable: VariableDeclaration) {
     }
 }
 
-export function isDeclaredInModule(parent: Node, node: Node): node is Declaration {
+export function isDeclaredInModule(parent: Node | null | undefined, node: Node): node is Declaration {
     return (
         parent?.type === 'Program'
         || parent?.type === 'ExportNamedDeclaration'
@@ -38,7 +38,7 @@ export function isDeclaredInModule(parent: Node, node: Node): node is Declaratio
     ) && isDeclaration(parent, node);
 }
 
-export function isDeclaration(parent: Node | null, node: Node): node is Declaration {
+export function isDeclaration(parent: Node | null | undefined, node: Node): node is Declaration {
     if (!parent) {
         return false;
     }
