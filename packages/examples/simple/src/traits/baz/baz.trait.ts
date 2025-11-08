@@ -16,7 +16,7 @@ export const Baz = trait<{
         instanceBaz(): void;
         defInstanceBaz?(): void;
     };
-}, [typeof Foo, FooBar]>({
+}, [typeof Foo, typeof FooBar]>({
     defaultBaz() {
         this.CONSTANT;
         this.CONSTANT_BAZ;

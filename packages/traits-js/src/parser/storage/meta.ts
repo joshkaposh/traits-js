@@ -1,8 +1,8 @@
 import type { Span, TSTupleElement } from "oxc-parser";
 import { Flags } from "./flags";
-import type { DeriveTupleType, TraitCallExpression, TraitObjectExpression } from "./node";
-import type { Reference } from "./file";
-import type { MethodParseResult } from "./project";
+import type { DeriveTupleType, TraitCallExpression, TraitObjectExpression } from "../node";
+import type { MethodParseResult } from "../parser";
+
 export type UnknownStatic = Span[]
 export type UnknownInstance = Array<{
     type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
@@ -169,8 +169,7 @@ export class TraitDefinition<Valid extends boolean = boolean> {
     }
 
     invalidate() {
-        console.log('invalidated ', this.name);
-
+        // console.log('invalidated ', this.name);
         this.#valid = false;
     }
 }

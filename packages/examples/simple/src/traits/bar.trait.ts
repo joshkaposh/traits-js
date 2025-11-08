@@ -65,7 +65,7 @@ export const Bar1 = trait<{
     bar1() { },
 });
 
-export const Bar2 = trait<{ bar2?(obj: any): void, bar?(n: number): void }, [typeof Bar, typeof Bar1]>({
+export const Bar2 = trait<{ bar2?(obj: any): void, bar?(n: number): void }, [typeof Bar1, typeof Bar]>({
     bar2() {
         this.bar1();
         this.requiredStaticBar();

@@ -1,7 +1,11 @@
-import { type CallExpression, type Function, type IdentifierReference, type ObjectExpression, type ObjectProperty, type TSLiteral, type TSTupleType, type TSTypeAliasDeclaration, type TSTypeLiteral, type TSTypeParameterInstantiation, type TSTypeQuery, type TSTypeReference, type VariableDeclaration, type VariableDeclarator } from 'oxc-parser';
+import { type CallExpression, type Function, type IdentifierName, type IdentifierReference, type ObjectExpression, type ObjectProperty, type TSLiteral, type TSTupleType, type TSTypeAliasDeclaration, type TSTypeLiteral, type TSTypeParameterInstantiation, type TSTypeQuery, type TSTypeReference, type VariableDeclaration, type VariableDeclarator } from 'oxc-parser';
 
 export type TypeDeclaration = TSTypeAliasDeclaration | TSTypeLiteral;
 
+export interface ConstVariableDeclaration extends VariableDeclaration {
+    kind: 'const';
+    declarations: [VariableDeclarator & { id: IdentifierName }];
+}
 
 export interface TraitAliasDeclaration extends TSTypeAliasDeclaration {
     typeAnnotation: TSTypeLiteral;
