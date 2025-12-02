@@ -8,7 +8,8 @@ import { Registry, type FileRegistry } from "./storage/registry";
 import { print, timestamp } from "./helpers";
 import { Stack, type VisitFn } from "./stack";
 import { TraitError } from "./errors";
-import { parseBindings, parseDefinitionImplementation, parseDerives, parseConfig, parseTraits } from "./parser";
+import { parseDefinitionImplementation, parseDerives, parseConfig, parseTraits } from "./parser";
+import type { ParseFileResultResult } from "./types";
 
 export type ProjectOptions = {
     cwd: string,
@@ -32,6 +33,8 @@ export class Project {
         const resolverOptions = options.resolverOptions ??= Object.create(null) as NapiResolveOptions;
         resolverOptions.preferAbsolute = true;
         resolverOptions.extensions = Array.from(new Set(resolverOptions.extensions ?? []).union(new Set(['.ts'])))
+
+        console.log('Project root: ', cwd);
 
 
         VERBOSE = options.verbose ?? false;
@@ -62,7 +65,37 @@ export class Project {
         return this.#traitFileNameFilter;
     }
 
-    async createStack() {
+
+    // loadDependencies(packageJson: string) {
+
+    // }
+
+    async init() {
+        await this.#dfsSourceFiles(await this.#createStackFromProjectEntry());
+    }
+
+    file(path: string): TraitFile | undefined {
+        const index = this.#ids[path];
+        return index == null ? void 0 : this.#files[index];
+    }
+
+    /**
+     * starting in `file`, searches for the trait that matches `bindingName`.
+     * This will follow the file registry's imports / exports to resolve any references not found in this file or project
+     * 
+     */
+    findTrait(file: TraitFile, bindingName: string) {
+        const trait = file.trait(bindingName);
+        if (trait) {
+            return trait;
+        }
+
+        if (file.isNeIndex()) {
+            return this.#resolveImportedTrait(file, bindingName);
+        }
+    }
+
+    async #createStackFromProjectEntry() {
         const then = performance.now();
         const { traits, traitFileNameFilter, indexFileNameFilter } = await this.#getEntry();
 
@@ -86,11 +119,7 @@ export class Project {
         return s;
     }
 
-    // loadDependencies(packageJson: string) {
-
-    // }
-
-    async findAddSourceFiles(stack: Stack<TraitFile>) {
+    async #dfsSourceFiles(stack: Stack<TraitFile>) {
         const self = this,
             files = self.#files,
             then = performance.now();
@@ -99,83 +128,9 @@ export class Project {
         console.log(timestamp('register', then));
 
         self.#initialize(files);
-    }
 
-    file(path: string): TraitFile | undefined {
-        const index = this.#ids[path];
-        return index == null ? void 0 : this.#files[index];
-    }
+        // console.log(files.map(f => ({ filePath: f.path, traits: f.totalCount })));
 
-    /**
-     * starting in `file`, searches for the trait that matches `bindingName`.
-     * This will follow the file registry's imports / exports to resolve any references not found in this file or project
-     * 
-     */
-    findTrait(file: TraitFile, bindingName: string) {
-        return file.trait(bindingName) ?? (file.isNeIndex() && this.#resolveImportedTrait(file, bindingName));
-    }
-
-    getDerives(
-        file: TraitFile<FileRegistry>,
-        derives: (TSTypeReference | TSTypeQuery)[],
-    ) {
-        const project = this;
-        const errors: TraitError[] = [];
-        const queuedDerives: TraitDefinition[] = [];
-        const { path } = file;
-        for (let i = 0; i < derives.length; i++) {
-            const element = derives[i]!;
-            let lookupName;
-            if (element.type === 'TSTypeReference' && element.typeName.type === 'Identifier') {
-                lookupName = element.typeName.name;
-
-            } else if (element.type === 'TSTypeQuery' && element.exprName.type === 'Identifier') {
-                lookupName = element.exprName.name;
-            }
-
-            if (!lookupName) {
-                continue;
-            }
-
-            const derive = project.findTrait(file, lookupName);
-            if (derive) {
-                queuedDerives.push(derive);
-            } else {
-                errors.push(TraitError.RefNotFound(path, lookupName));
-                break;
-            }
-
-            // console.log('GET DERIVES: ', lookupName, project.findRef(file, lookupName));
-
-            // const localTrait = file.trait(lookupName);
-
-            // if (localTrait) {
-            //     queuedDerives.push(localTrait);
-            // } else if (file.registry.importVars[lookupName]) {
-            //     const importedTrait = project.#resolveImportedTrait(file, lookupName);
-            //     if (importedTrait instanceof TraitDefinition && importedTrait.valid) {
-            //         queuedDerives.push(importedTrait);
-            //     } else {
-            //         errors.push(TraitError.RefNotFound(path, lookupName));
-            //         break;
-            //     }
-            // }
-
-            // else if (lookupName in importTypes) {
-            //     console.log('Project.getDerives - TODO: resolve type');
-
-            // } else {
-            //     errors.push(TraitError.RefNotFound(path, lookupName))
-            //     break;
-            // }
-        }
-
-        if (derives.length !== queuedDerives.length) {
-            errors.push(TraitError.InvalidDeriveType());
-            return { valid: false, errors: errors } as const;
-        }
-
-        return { valid: true, derives: queuedDerives } as const;
     }
 
     #initialize(files: TraitFile[]) {
@@ -186,13 +141,22 @@ export class Project {
             if (file.isIndex()) {
                 continue
             }
-            const traits: Record<string, TraitDefinition> = {};
-            const errors: Record<string, TraitError[]> = {};
-            const { types, vars, tracker } = parseBindings(file);
-            parseTraits(file as TraitFile<FileRegistry>, traits, errors);
-            file.addBindings(tracker, types, vars, traits);
-            // TODO: only parse if errors.length === 0
-            parseDerives(project, file as TraitFile<FileRegistry>);
+
+            file.init();
+
+            console.log('init: ', file.name);
+
+
+            const { traits,
+                errors,
+                errored
+            } = parseTraits(file as TraitFile<FileRegistry>);
+
+            file.setTraits(traits);
+
+            if (!errored) {
+                parseDerives(project, file as TraitFile<FileRegistry>);
+            }
         }
 
         for (let i = 0; i < files.length; i++) {
@@ -223,6 +187,29 @@ export class Project {
         console.log(timestamp('initialize', then));
     }
 
+    #resolveImport(file: TraitFile<FileRegistry>, localName: string) {
+        const importVar = file.registry.importVars[localName];
+        if (!importVar) {
+            return;
+        }
+
+        const resolvedRequest = this.resolver.sync(dirname(file.path), importVar.moduleRequest);
+
+        if (resolvedRequest.path) {
+            if (resolvedRequest.path.startsWith(this.#cwd)) {
+                if (importVar.localToImport != null) {
+                    // TODO: use this instead of below
+                    return this.file(resolvedRequest.path)?.get(importVar.localToImport)
+                }
+            } else {
+                // TODO: node_module:
+                // * if unparsed:
+                // * 1. check directory of package.json for {trait,traits}.json or {trait,traits}.data.json
+                // * 2. parse and if successful, add to cache for future lookups
+            }
+        }
+    }
+
     #resolveImportedTrait(file: TraitFile<FileRegistry>, localName: string) {
         const importVar = file.registry.importVars[localName];
         if (!importVar) {
@@ -235,7 +222,7 @@ export class Project {
             if (resolvedRequest.path.startsWith(this.#cwd)) {
                 const previous = this.file(resolvedRequest.path);
                 if (previous) {
-                    const resolvedName = importVar.localToImport[localName]!;
+                    const resolvedName = importVar.localToImport;
                     if (resolvedName) {
                         return previous.trait(resolvedName);
                     }
@@ -324,7 +311,7 @@ function createVisitFn(
 
             for (let index = 0; index < staticImports.length; index++) {
                 const { entries, moduleRequest } = staticImports[index]!;
-                const localToImport = Object.fromEntries(entries.map(e => [e.localName.value, e.importName.name]));
+                // const localToImport = Object.fromEntries(entries.map(e => [e.localName.value, e.importName.name]));
                 for (let j = 0; j < entries.length; j++) {
                     const e = entries[j]!;
                     const r = e.isType ? importTypes : importVars;
@@ -333,7 +320,7 @@ function createVisitFn(
                         start: e.importName.start ?? e.localName.start,
                         end: e.localName.end,
                         type: e.importName.kind,
-                        localToImport: localToImport,
+                        localToImport: e.importName.name,
                         moduleRequest: moduleRequest.value
                     };
                 }

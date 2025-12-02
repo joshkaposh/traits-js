@@ -8,21 +8,23 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./modifier": "./src/trait/modifier.ts",
-    "./config": "./src/config.ts"
+    "./modifier": "./src/lib/modifier.ts",
+    "./config": "./src/lib/config.ts"
   },
   "trustedDependencies": [
     "oxc-resolver"
   ],
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/eslint-scope": "^8.3.2"
+    "@types/eslint-scope": "^8.3.2",
+    "oxlint": "^1.30.0"
   },
   "peerDependencies": {
     "typescript": "latest"
   },
   "dependencies": {
     "eslint-scope": "^8.4.0",
+    "nanoid": "^5.1.6",
     "oxc-parser": "^0.94.0",
     "oxc-resolver": "^11.7.1",
     "oxc-walker": "^0.5.1",

@@ -1,10 +1,11 @@
-import type { Declaration, ImportNameKind, StaticExportEntry } from "oxc-parser";
-import type { TraitAliasDeclaration } from "../node";
+import type { Declaration, ImportNameKind, Program, StaticExportEntry } from "oxc-parser";
+import { is, type TraitAliasDeclaration, type TypeDeclaration } from "../node";
 import type { TraitDefinition } from "./meta";
+import { walk } from "oxc-walker";
 
 export type Import = {
     type: ImportNameKind;
-    localToImport: Record<string, string | undefined>;
+    localToImport: string | undefined;
     moduleRequest: string;
     start: number;
     end: number;
@@ -57,6 +58,10 @@ export const Registry = {
             types: {} as ReExportRegistry,
             vars: {} as ReExportRegistry,
             traits: {} as Record<string, TraitDefinition>,
+
+            store(ast: Program, path: string) {
+
+            },
             has(name: string) {
                 return name in this.types || name in this.vars;
             },
@@ -75,6 +80,64 @@ export const Registry = {
             types: {} as DeclarationRegistry<TraitAliasDeclaration>,
             vars: {} as DeclarationRegistry,
             traits: {} as Record<string, TraitDefinition>,
+            store(ast: Program, path: string) {
+
+                const exportVars = this.exportVars, exportTypes = this.exportTypes;
+                const types: DeclarationRegistry<TypeDeclaration> = {}, vars: DeclarationRegistry = {};
+
+                walk(ast, {
+                    enter(node, parent) {
+                        if (parent && is.declaredInModule(parent, node)) {
+                            if (
+                                is.constVariableDeclaration(node)
+                                && node.declarations[0].id.name in exportVars
+                            ) {
+                                vars[node.declarations[0].id.name] = {
+                                    node,
+                                    start: parent.start,
+                                    end: parent.end,
+                                };
+
+                            } else if (
+                                (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
+                                && node.id
+                            ) {
+                                const name = node.id.name;
+                                vars[name] = {
+                                    node,
+                                    start: parent.start,
+                                    end: parent.end,
+                                };
+
+                            } else if (
+                                node.type === 'TSTypeAliasDeclaration'
+                                && node.typeAnnotation.type === 'TSTypeLiteral'
+                            ) {
+                                const typeDeclarationName = node.id.name;
+                                if (!(typeDeclarationName in exportTypes)) {
+                                    console.error('trait files must export all type declarations');
+                                    console.log(`${path}`);
+                                    console.error(`declared a private type ${typeDeclarationName}\n`);
+                                    return;
+                                }
+
+                                types[node.id.name] = {
+                                    node: node as TraitAliasDeclaration,
+                                    start: node.start,
+                                    end: node.end,
+                                };
+                            }
+                        }
+                    },
+
+                });
+
+                // @ts-expect-error
+                this.types = types;
+                // @ts-expect-error
+                this.vars = vars;
+            },
+
             has(name: string) {
                 return name in this.importTypes
                     || name in this.importVars

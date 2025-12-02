@@ -1,4 +1,4 @@
-import type { DefaultKeysOf, EmptyObject, ValidClass, This } from "./helper-types";
+import type { DefaultKeysOf, EmptyObject, ValidClass, This, OrEmptyObj, Prettify } from "./helper-types";
 import { instance, type, type Modifier, type ModifierRecord } from "./modifier";
 
 
@@ -22,12 +22,14 @@ export type TraitRecord = {
  * Used to convert a `TraitRecord` into a class ready to be derived 
  */
 export type Trait<Base extends TraitRecord = {}, Derives extends TraitRecord = {}> = (
-    new <T>(injection: T extends Derive<Base, Derives> ? Prettify<T> : never) => Normalize<GetInstance<Base & Derives>>
+    new (
+        injection: IntoImpl<Base, Derives>
+    ) => Normalize<GetInstance<Base & Derives>>
 ) & Normalize<OmitModifiers<Base & Derives>> & Self<Base & Derives>;
 
 export type IntoTrait<T> = T extends Trait ? T : T extends TraitRecord ? Trait<T> : never;
 
-export type Derive<Base, Derives> = RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>;
+// export type Derive<Base, Derives> = RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>;
 
 
 type Class<S, I> = (new () => I) & S;
@@ -42,17 +44,17 @@ export type Type<Target extends ValidClass, TargetTrait> =
 
 // Target & (new (...args: ConstructorParameters<Target>) => (InstanceType<Target & I> )) & T : never;
 
-const FooType = trait<{ foo(): void }>({});
+// const FooType = trait<{ foo(): void }>({});
 
 class FooClass2 { }
 
-const WHAT = impl<typeof FooType, typeof FooClass2>(() => ({
-    foo() {
+// const WHAT = impl<typeof FooType, typeof FooClass2>(() => ({
+//     foo() {
 
-    },
-}));
+//     },
+// }));
 
-type WhatInst = InstanceType<typeof WHAT>;
+// type WhatInst = InstanceType<typeof WHAT>;
 // Impl<ConstructorParameters<Target>, Target & { [K in keyof T]: T[K] }, InstanceType<Target> & InstanceType<T>> : never;
 
 
@@ -71,99 +73,6 @@ type Normalize<T> = {
 //     :
 //     never;
 
-type Impl<A extends any[], S, I> = (new (...args: A) => I) & S;
-
-
-/**
- * ## Usage
- * 
- * The creation and usage of trait requires a strict syntax.
- * This is necessary for traits to work in general and also enables optimizations such as inlining.
- * 
- * Traits *must* be defined at the root ( Program ) scope of a file and *must be a named export*.
- * 
- * Proper usage: 
- * ```
- * export const MyTrait = trait<TraitDescriptor>(TraitImplementation);
- * ```
- * 
- * Improper usage:
- * ```
- * // This is a valid trait, but it is not exported. It will either be silently ignored or result in a compilation error if referenced
- * const MyTrait = trait<TraitDescriptor>(TraitImplementation);
- * 
- * export const MyTrait = {
- *   fn() {
- *     // this call is neither exported nor at the program scope
- *     return trait<{}>({});
- *   }
- * };
- * 
- * 
- * 
- * ```
- * trait<{
- *  foo(): void;
- *  defFoo?(): void;
- * }>({
- *   defFoo() {}
- * });
- * ```,
- * 
- * `foo` is a *required* method and __must__ be implemented by *any* implementor
- * 
- * `defFoo` is a *default* method and __must be implemented by trait authors.
- * 
- *  "Default" methods are annotated by the optional property operator ( `?`, e.g foo?<T>() )
- *  Default methods will be automatically injected into the AST.
- *  and __must__ be implemented by the trait author ( see below )
- *  of any class that implements `Foo`.
- * 
- *  You may override these default methods for more
- *  specific implementations and optimizations to your use case.
- * 
- */
-// export function trait<const Base extends TraitRecord, const DeriveTypes extends any[] = []>(impl: Definition<Base, GetTraitRecordsFromDerives<DeriveTypes>>): Trait<Base, GetTraitRecordsFromDerives<DeriveTypes>>
-export function trait<const Base extends TraitRecord, const DeriveTypes extends any[] = []>(impl: Definition<Base, GetTraitRecordsFromDerives<DeriveTypes>>): Trait<Base, GetTraitRecordsFromDerives<DeriveTypes>> {
-    return unused(impl);
-}
-
-
-export type Cast<T, U> = keyof U extends keyof T ? U : never;
-export function cast<T, U extends T = T>(): Cast<T, U> {
-    return void 0 as unknown as Cast<T, U>;
-}
-
-/**
- * 
- * `impl` calls are only recognized inside of static blocks or the program scope.
- * 
- * Any call in any other scope is a compilation error and
- * must be moved to either the program scope or static block.
- * @returns `undefined` typed as `Impl<Class, Trait>`, which effectively turns into
- * `Class & Trait & (new (...ConstructorParameters<Class>) => InstanceType<Class & Trait>)`.
- * 
- * At compilation time, the methods specified in the return type of the `Class` parameter
- * and __any__ default methods *not* implemented (both in the trait being implemented, as well as its derived trait(s))
- * will be __injected__ into the class specified in `impl`s type parameter (e.g `impl<SomeTrait, typeof SomeClass>()`)
- * 
- * class SomeClass {}
- * 
- * impl<typeof Foo, typeof SomeClass>(
- * ```
- * `Self` is a reference to `SomeClass` (the constructor type).
- * ```
- * (Self) => ({
- * 
- * 
- * })); 
- * ```
- */
-export function impl<const T, const Self extends ValidClass = ValidClass>(
-    Class: (self: Self) => Implementation<T>
-): Type<Self, T> {
-    return unused(Class);
-}
 
 // type Base<T> = T extends Trait<infer B extends TraitRecord> ? B : never;
 // type Derives<T> = T extends Trait<any, infer D> ? D : {};
@@ -256,8 +165,8 @@ type InstanceRequireds<Base, Derives> =
     Derives extends { [instance]: infer D } ?
     {
         [instance]:
-        GetRequireds<D & (Base extends { [instance]: infer B } ? B : never)>
-        & Self<D & (Base extends { [instance]: infer I } ? I : never)>
+        GetRequireds<D & (Base extends { [instance]?: infer B } ? B : {})>
+        & Self<D & (Base extends { [instance]: infer I } ? I : {})>
     } :
     Base extends { [instance]: infer I } ?
     {
@@ -312,12 +221,8 @@ type DefaultInstanceMethods<Base, Derives> =
     ) :
     {};
 
-type OrEmptyObj<T> = T extends EmptyObject ? EmptyObject : T;
-export type Definition<Base, Derives = {}> = OrEmptyObj<DefaultMethodsFor<Base> & DefaultInstanceMethods<Base, Derives>> & Self<Base & Derives>
 
-type RequiredTraitMethods<Base, Derives> = OrEmptyObj<GetRequireds<Derives & Base> & InstanceRequireds<Base, Derives> & Self<Base & Derives>>;
-
-type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitRecord = {}> = T extends [infer Current, ...infer Rest] ? GetTraitRecordsFromDerives<Rest, Merged & (
+export type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitRecord = {}> = T extends [infer Current, ...infer Rest] ? GetTraitRecordsFromDerives<Rest, Merged & (
     Current extends Trait<infer Base, infer Derives> ?
     Derives & Base :
     Current extends TraitRecord ? Current :
@@ -325,17 +230,18 @@ type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitRecord = {}
 )> : Merged;
 
 
-type Prettify<T> = { [K in keyof T]: T[K] } & {}
 
-type Implementation<T> =
-    T extends Trait<infer Base, infer Derives> ? (RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>) & Self<Base & Derives> :
-    T extends TraitRecord ? RequiredTraitMethods<T, {}> & PartialMethods<T, {}> & Self<T>
-    : 'Error: if you are seeing this, you tried passing a type that was not created from `trait` to `impl`. `impl` may only receive `TraitClass`(s) and / or `TraitRecord`(s)';
 
-function unused<T>(..._args: any[]): T {
-    return void 0 as never;
-}
+export type Definition<Base, Derives = {}> = OrEmptyObj<DefaultMethodsFor<Base> & DefaultInstanceMethods<Base, Derives>> & Self<Base & Derives>
 
+type RequiredTraitMethods<Base, Derives> = OrEmptyObj<GetRequireds<Derives & Base> & InstanceRequireds<Base, Derives> & Self<Base & Derives>>;
+
+type IntoImpl<Base, Derives> = (RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>) & Self<Base & Derives>;
+
+export type Implementation<T> =
+    T extends Trait<infer Base, infer Derives> ? IntoImpl<Base, Derives> :
+    T extends TraitRecord ? IntoImpl<T, {}> :
+    'Error: if you are seeing this, you tried passing a type that was not created from `trait` to `impl`. `impl` may only receive `TraitClass`(s) and / or `TraitRecord`(s)';
 
 type Foo = {
     FOO: number;
@@ -348,47 +254,46 @@ type Foo = {
     }
 };
 
-const Foo = trait<Foo>({
-    sayHello(_name) { },
-    [instance]: {
-        defInstFoo() {
+// const Foo = trait<Foo>({
+//     sayHello(_name) { },
+//     [instance]: {
+//         defInstFoo() {
 
-        },
-    }
-});
+//         },
+//     }
+// });
 
-class EmptyClass {
-    static #staticProp = 5;
-    static staticProp = 5;
-    instanceProp = 10;
+// class EmptyClass {
+//     static #staticProp = 5;
+//     static staticProp = 5;
+//     instanceProp = 10;
 
-    static {
-        const Self = this;
-        const fproper = impl<typeof Foo, typeof EmptyClass>((Self) => ({
-            FOO: 1,
-            foo1() {
-                Self.#staticProp;
-            },
-            foo2() { },
-            [instance]: {
-                instFoo() { },
-            }
-        }))
-    }
+//     static {
+//         const Self = this;
+//         const fproper = impl<typeof Foo, typeof EmptyClass>((Self) => ({
+//             FOO: 1,
+//             foo1() {
+//                 Self.#staticProp;
+//             },
+//             foo2() { },
+//             [instance]: {
+//                 instFoo() { },
+//             }
+//         }))
+//     }
 
-    // m() {
-    //     const obj = as<typeof EmptyClass, typeof Foo>();
-    //     new obj().m;
-    //     obj.FOO;
-    //     obj.foo1();
-    //     obj.foo2();
-    //     obj.sayHello('');
-    //     new obj().m();
-    //     new obj().instanceProp;
-    //     new obj().defInstFoo();
-    // }
+//     // m() {
+//     //     new obj().m;
+//     //     obj.FOO;
+//     //     obj.foo1();
+//     //     obj.foo2();
+//     //     obj.sayHello('');
+//     //     new obj().m();
+//     //     new obj().instanceProp;
+//     //     new obj().defInstFoo();
+//     // }
 
-}
+// }
 
 // const MyTypeect2 = EmptyClass as Type<typeof EmptyClass, typeof Foo>;
 
@@ -402,11 +307,6 @@ class EmptyClass {
 
 // type Branded<T, Brand> = T & {
 //     brand: Brand;
-// }
-
-
-// function as<T extends ValidClass, C extends ValidClass>(): As<C, T> {
-//     return void 0 as unknown as As<C, T>;
 // }
 
 // type BranderType = {
@@ -557,29 +457,29 @@ class FooClass {
     hidad = 'hidad' as const;
 }
 
-const FooClassDerivesFooTrait = impl<typeof Foo, typeof FooClass>((self) => ({
-    FOO: 1,
-    foo1() {
-        self.himom;
-        self.prototype.hidad;
-        this.sayHello('');
-        this.FOO;
-        // @ts-expect-error
-        this.FOO = 3;
-        this.foo1();
-        this.foo2();
-        // this[instance].defInstFoo();
-    },
-    foo2() { },
-    [instance]: {
-        instFoo() {
-            this.defInstFoo();
-            this.instFoo();
-        },
-        defInstFoo() {
-        },
-    }
-}));
+// const FooClassDerivesFooTrait = impl<typeof Foo, typeof FooClass>((self) => ({
+//     FOO: 1,
+//     foo1() {
+//         self.himom;
+//         self.prototype.hidad;
+//         this.sayHello('');
+//         this.FOO;
+//         // @ts-expect-error
+//         this.FOO = 3;
+//         this.foo1();
+//         this.foo2();
+//         // this[instance].defInstFoo();
+//     },
+//     foo2() { },
+//     [instance]: {
+//         instFoo() {
+//             this.defInstFoo();
+//             this.instFoo();
+//         },
+//         defInstFoo() {
+//         },
+//     }
+// }));
 
 
 // type PickInstanceIfHasDefaultKeys<T, Tself = {}> =

@@ -2,7 +2,8 @@ import type { ParseFileResultResult } from "../types";
 import { TraitDefinition } from ".";
 import { Registry, type DeclarationRegistry, type FileRegistry, type IndexRegistry, type Reference } from "./registry";
 import * as eslintScope from 'eslint-scope';
-import type { Node, Span, TSInterfaceDeclaration, TSTypeAliasDeclaration } from "oxc-parser";
+import { visitorKeys, type Node, type Span, type TSInterfaceDeclaration, type TSTypeAliasDeclaration } from "oxc-parser";
+import { walk } from "oxc-walker";
 
 export class TraitFile<R extends Registry = Registry> {
 
@@ -25,15 +26,6 @@ export class TraitFile<R extends Registry = Registry> {
         this.#vars = {};
         this.#traits = {};
         this.#size = 0;
-    }
-
-    isIndex(): this is TraitFile<IndexRegistry> {
-        return this.#isIndex;
-    }
-
-
-    isNeIndex(): this is TraitFile<FileRegistry> {
-        return !this.#isIndex;
     }
 
     get path() {
@@ -68,44 +60,43 @@ export class TraitFile<R extends Registry = Registry> {
         return this.#registry;
     }
 
-    // get tracker() {
-    //     return this.#tracker;
-    // }
-
-
-    // get vars() {
-    //     return this.#vars;
-    // }
-
-
-    set tracker(tracker: eslintScope.ScopeManager) {
-        this.#tracker = tracker;
+    get totalCount() {
+        return this.#size;
     }
-    addBindings(
-        tracker: eslintScope.ScopeManager,
-        types: DeclarationRegistry<TSTypeAliasDeclaration | TSInterfaceDeclaration>,
-        vars: DeclarationRegistry,
+
+
+    isIndex(): this is TraitFile<IndexRegistry> {
+        return this.#isIndex;
+    }
+
+
+    isNeIndex(): this is TraitFile<FileRegistry> {
+        return !this.#isIndex;
+    }
+
+    init() {
+        walk(this.ast, {
+            enter(node) {
+                // TODO: wtf? why doesn't parseSync add range??
+                this.replace({ ...node, range: [node.start, node.end] })
+            },
+        });
+
+        this.#tracker = eslintScope.analyze(this.ast as any, {
+            childVisitorKeys: visitorKeys,
+            ecmaVersion: 2022,
+            sourceType: 'module',
+        });
+
+        this.#registry.store(this.ast, this.path);
+    }
+
+    setTraits(
         traits: Record<string, TraitDefinition>
     ) {
-        this.#tracker = tracker;
-        // this.#registry.types = types
-        this.#types = types;
-        this.#vars = vars;
         this.#traits = traits;
         this.#size = Object.keys(traits).length
     }
-
-    loc(name: string): Span | undefined {
-        return this.#types[name] ?? this.#vars[name];
-    }
-
-    // has(name: string) {
-    //     return this.#registry.has(name);
-    // }
-
-    // hasType(name: string) {
-    //     return this.#registry.hasType(name);
-    // }
 
     get(bindingName: string) {
         const t = this.#traits[bindingName];
@@ -121,10 +112,6 @@ export class TraitFile<R extends Registry = Registry> {
             return (this.#registry.type === 'file' ? this.#registry.get(bindingName) : void 0);
 
         }
-    }
-
-    get totalCount() {
-        return this.#size;
     }
 
     trait(name: string) {

@@ -8,8 +8,15 @@ export class Stack<D = any, K extends any = string> {
     constructor();
     constructor(initialKey: K, initialData: D);
     constructor(initialKey?: K, initialData?: D) {
-        this.#stack = initialData ? [initialData] : [];
-        this.#ids = new Set(initialKey ? [initialKey] : []);
+        const stack: D[] = [];
+        const ids = new Set<K>();
+        if (initialKey != null) {
+            ids.add(initialKey);
+            stack.push(initialData!);
+        }
+
+        this.#stack = stack;
+        this.#ids = ids;
     }
 
     get length() {
@@ -44,22 +51,16 @@ export class Stack<D = any, K extends any = string> {
         }
     }
 
-    //     push(key: K, data: D) {
-    // if (!ids.has(key)) {
-    //                 queuedFrames.push(data);
-    //             }
-    //             ids.add(key);
-    //     }
+    has(key: K) {
+        return this.#ids.has(key);
+    }
+
+    clear() {
+        this.#ids.clear();
+        this.#stack.length = 0;
+    }
 
     peek(): D | undefined {
         return this.#stack.at(-1);
-    }
-
-    // visited(key: K): boolean {
-    //     return this.#ids.has(key);
-    // }
-
-    has(key: K) {
-        return this.#ids.has(key);
     }
 }

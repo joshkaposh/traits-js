@@ -22,15 +22,23 @@ export async function resolve(
     indexFileNameFilter: string
 ): Promise<ParseFileResult> {
     const errors: string[] = [];
+    // console.log('RESOLVE: ', path);
+
     if (existsSync(path)) {
+        // console.log('RESOLVE: path exists!');
         const file = Bun.file(path);
         const stats = await file.stat();
         let result!: ParseFileResultResult;
+        const resolved = resolver.sync(path, './');
+        // console.log('RESOLVER: ', resolved);
+
 
         if (stats.isDirectory()) {
-            const resolved = resolver.sync(path, './');
+            // console.log('RESOLVE: path is directory!');
             if (resolved.path) {
                 const absolutePath = resolved.path;
+                // console.log('found final path: ', absolutePath);
+
                 const file = Bun.file(absolutePath);
                 const name = basename(path);
                 const code = await file.text();
@@ -58,6 +66,7 @@ export async function resolve(
             const name = basename(path);
             const code = await file.text();
             const resolved = resolver.sync(path, './');
+
             result = {
                 name: name,
                 path: path,

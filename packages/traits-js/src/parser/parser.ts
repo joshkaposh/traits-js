@@ -1,19 +1,19 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import pc from 'picocolors';
-import { Scope, ScopeManager, analyze } from 'eslint-scope';
-import { visitorKeys, type Function, type ObjectProperty, type ObjectPropertyKind } from "oxc-parser";
+import { Scope } from 'eslint-scope';
+import { type Function, type ObjectProperty, type ObjectPropertyKind, type TSTypeQuery, type TSTypeReference } from "oxc-parser";
 import { walk } from "oxc-walker";
 import { TraitDefinition } from "./storage";
 import type { DeclarationRegistry, FileRegistry, Reference } from "./storage/registry";
 import { TraitError } from "./errors";
-import { is, type TraitAliasDeclaration, type TraitCallExpression, type TraitObjectProperty, type TypeArguments } from "./node";
+import { type TraitAliasDeclaration, type TraitCallExpression, type TraitObjectProperty, type TypeArguments } from "./node";
 import { TRAIT_FN_NAME } from "./constants";
 import { DEFAULT, Flags, REQUIRED } from "./storage/flags";
 import { addTypeRef, createFilteredExportOrImportNames } from "./helpers";
 import type { TraitFile } from "./storage/trait-file";
 import type { Project } from "./project";
-import type { ParsedTraitConfigExport } from "../config";
+import type { TraitConfig } from "../lib/config";
 
 export type CheckMethodResult = {
     readonly importRefs: Record<string, Reference[]>;
@@ -25,82 +25,113 @@ export type CheckMethodResult = {
     }[];
 }
 
-export function parseBindings(file: TraitFile) {
-    const { registry: { exportTypes, exportVars, types, vars }, ast } = file as TraitFile<FileRegistry>;
-    walk(ast, {
-        enter(node) {
-            // TODO: wtf? why doesn't parseSync add range??
-            this.replace({ ...node, range: [node.start, node.end] })
-        },
-    });
+export type MethodParseResult = {
+    readonly importRefs: Record<string, Reference[]>;
+    readonly exportRefs: Reference[];
+    readonly ambiguousCallSites: {
+        identName: string;
+        start: number;
+        end: number;
+    }[];
+};
 
-    const tracker = analyze(ast as any, {
-        childVisitorKeys: visitorKeys,
-        ecmaVersion: 2022,
-        sourceType: 'module',
-    });
+export async function parseConfig(cwd: string): Promise<Required<TraitConfig> | string> {
+    const NAMES = [
+        'traits.config.ts',
+        'traits.config.js',
+        'trait.config.ts',
+        'trait.config.js'
+    ];
 
-    walk(ast, {
-        enter(node, parent) {
-            if (parent && is.declaredInModule(parent, node)) {
-                if (
-                    is.constVariableDeclaration(node)
-                    && node.declarations[0].id.name in exportVars
-                ) {
-                    const name = node.declarations[0].id.name;
-                    // const references = tracker.acquire(node as any)?.references ?? [];
-                    vars[name] = {
-                        node,
-                        start: parent.start,
-                        end: parent.end,
-                        // references: references,
-                    };
+    const configErrorMessage = (type: string, path: string, message: string) => `${pc.red(`ConfigError - ${type}:`)}\n${formatPath(path)}${message}\n`;
 
-                } else if (
-                    (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
-                    && node.id
-                ) {
-                    const name = node.id.name;
-                    // const references = tracker.acquire(node as any)?.references ?? [];
-                    vars[name] = {
-                        node,
-                        start: parent.start,
-                        end: parent.end,
-                        // references: references,
-                    };
-
-                } else if (
-                    node.type === 'TSTypeAliasDeclaration'
-                    && node.typeAnnotation.type === 'TSTypeLiteral'
-                ) {
-                    const typeDeclarationName = node.id.name;
-                    if (!(typeDeclarationName in exportTypes)) {
-                        console.error('trait files must export all type declarations');
-                        console.log(`${file.path}`);
-                        console.error(`declared a private type ${typeDeclarationName}\n`);
-                        return;
-                    }
-
-                    types[node.id.name] = {
-                        node: node as TraitAliasDeclaration,
-                        start: node.start,
-                        end: node.end,
-                    };
+    function formatPath(path: string, useFileName?: boolean) {
+        if (useFileName) {
+            let index = path.length - 1;
+            while (index > 0) {
+                const char = path.at(index)!;
+                if (char === '/' || char === '\\') {
+                    index += 1;
+                    break;
                 }
+                index -= 1;
             }
-        },
 
-    });
+            path = path.slice(index);
+        }
 
-    return { tracker, types, vars };
+        return `[ ${path} ]`;
+    }
+
+    let path;
+
+    for (let i = 0; i < NAMES.length; i++) {
+        const p = join(cwd, NAMES[i]!);
+        if (existsSync(p)) {
+            path = p;
+            break;
+        }
+    }
+
+    if (!path) {
+        return configErrorMessage('NoConfigFile', cwd, '\ndirectory has no {trait,traits}.config.{ts,js} file');
+    }
+
+    const module = await import(path);
+    const config = module.default as unknown;
+    const parsed: Partial<TraitConfig> = {
+        cwd: cwd,
+    };
+
+    let errors = '';
+    if (config) {
+        if (typeof config === 'object') {
+
+            parsed.indexFileNameFilter = 'indexFileNameFilter' in config && typeof config.indexFileNameFilter === 'string' ?
+                config.indexFileNameFilter :
+                'index.ts';
+
+            parsed.traitFileNameFilter = 'traitFileNameFilter' in config && typeof config.traitFileNameFilter === 'string' ?
+                config.traitFileNameFilter :
+                '.trait.ts';
+
+            if ('traits' in config) {
+                if (typeof config.traits === 'string') {
+                    const path = join(cwd, config.traits);
+                    if (existsSync(path)) {
+                        parsed.traits = path;
+                        return parsed as Required<TraitConfig>;
+                    } else {
+                        errors += configErrorMessage('FileNotFound', path, `\n${pc.yellow('...has a trait entry path')} ${formatPath(path)}\n${pc.yellow('...but no file exists at that path.')}`);
+                    }
+                } else {
+                    errors += configErrorMessage('TraitsFieldTypeNotEqualString', path, `\n${pc.yellow('...')}expected typeof config.traits to equal "string", but was "${typeof config.traits}"`);
+                }
+
+            } else {
+                errors += configErrorMessage('NoTraitsField', path, '\n...expected config.traits field to exist');
+            }
+
+        } else {
+            errors += configErrorMessage('DefaultExportInvalidType', path, `\n...expected default export to be type "object", but was ${typeof config}`);
+        }
+    } else {
+        errors += configErrorMessage('NoDefaultExport', path, '\n...expected a default export.');
+    }
+
+    if (errors.length) {
+        return errors
+    } else {
+        return parsed as Required<TraitConfig>;
+    }
+
 }
 
-export function parseTraits(
-    file: TraitFile<FileRegistry>,
-    traits: Record<string, TraitDefinition>,
-    errors: Record<string, TraitError[]>
-) {
+export function parseTraits(file: TraitFile<FileRegistry>) {
+    const traits: Record<string, TraitDefinition> = {},
+        errors: Record<string, TraitError[]> = {};
     const { path, registry: { types, vars } } = file;
+    let errored = false;
 
     for (const varName in vars) {
         const { node: declaration, start, end } = vars[varName]!;
@@ -123,12 +154,14 @@ export function parseTraits(
             if (args.length !== 1) {
                 // console.log('error: invalid trait argument length');
                 definition_errors.push(TraitError.InvalidTraitCallArguments());
+                errored = true;
                 errors[varName] = definition_errors;
                 traits[varName] = new TraitDefinition(call_expr as TraitCallExpression, varName, path, start, end, false, Flags.empty);
                 continue;
             }
             const base = parseType(call_expr.typeArguments.params as TypeArguments['params'], file.code, types);
             if (Array.isArray(base)) {
+                errored = true;
                 definition_errors.push(...base);
                 traits[varName] = new TraitDefinition(call_expr, varName, path, start, end, false, Flags.empty)
                 continue;
@@ -144,6 +177,12 @@ export function parseTraits(
                 base,
             );
         }
+    }
+
+    return {
+        traits,
+        errors,
+        errored
     }
 }
 
@@ -162,7 +201,8 @@ export function parseDerives(project: Project, file: TraitFile<FileRegistry>) {
             continue;
         }
 
-        const derives = project.getDerives(
+        const derives = getDerives(
+            project,
             file,
             uninitDerives,
         );
@@ -170,40 +210,14 @@ export function parseDerives(project: Project, file: TraitFile<FileRegistry>) {
         if (derives.valid) {
             def.join(derives.derives);
         } else {
-            console.log('[fail]: %s ', def.name,
-                // derives.errors.map(e => e.message)
+            console.log('[ fail (derives) ]: %s ', def.name,
+                derives.errors.map(e => e.message)
             );
             def.invalidate();
         }
 
     }
 }
-
-function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TraitAliasDeclaration>): Flags | TraitError[] {
-    if (!typeArguments.length) {
-        // console.log('#parseType: no type arguments');
-        return [TraitError.EmptyTraitTypeArguments()];
-    } else if (typeArguments.length > 2) {
-        // console.log('#parseType: type arguments length greater than 2');
-        return [TraitError.InvalidTraitTypeArgument()];
-    }
-
-    if (typeArguments.length === 1) {
-        const typeArgument = typeArguments[0];
-        if (!typeArgument) {
-            return [TraitError.EmptyTraitTypeArguments()];
-        }
-
-        if (typeArgument.type !== 'TSTypeLiteral' && typeArgument.type !== 'TSTypeReference') {
-            return [TraitError.InvalidTraitTypeArgument()];
-        }
-        return Flags.tryFrom(types, code, typeArgument);
-    } else {
-        return Flags.tryFrom(types, code, typeArguments[0]);
-    }
-
-}
-
 
 export function parseDefinitionImplementation(file: TraitFile<FileRegistry>, definition: TraitDefinition) {
     if (!definition.valid) {
@@ -250,6 +264,32 @@ export function parseDefinitionImplementation(file: TraitFile<FileRegistry>, def
         return;
     }
     definition.initialize(dependencies)
+}
+
+
+function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TraitAliasDeclaration>): Flags | TraitError[] {
+    if (!typeArguments.length) {
+        // console.log('#parseType: no type arguments');
+        return [TraitError.EmptyTraitTypeArguments()];
+    } else if (typeArguments.length > 2) {
+        // console.log('#parseType: type arguments length greater than 2');
+        return [TraitError.InvalidTraitTypeArgument()];
+    }
+
+    if (typeArguments.length === 1) {
+        const typeArgument = typeArguments[0];
+        if (!typeArgument) {
+            return [TraitError.EmptyTraitTypeArguments()];
+        }
+
+        if (typeArgument.type !== 'TSTypeLiteral' && typeArgument.type !== 'TSTypeReference') {
+            return [TraitError.InvalidTraitTypeArgument()];
+        }
+        return Flags.tryFrom(types, code, typeArgument);
+    } else {
+        return Flags.tryFrom(types, code, typeArguments[0]);
+    }
+
 }
 
 function parseTraitProperties(
@@ -322,16 +362,50 @@ function parseTraitInstanceProperties(
     }
 }
 
+function getDerives(
+    project: Project,
+    file: TraitFile<FileRegistry>,
+    derives: (TSTypeReference | TSTypeQuery)[],
+) {
+    const errors: TraitError[] = [];
+    const queuedDerives: TraitDefinition[] = [];
+    const { path } = file;
+    for (let i = 0; i < derives.length; i++) {
+        const element = derives[i]!;
+        let lookupName;
+        if (element.type === 'TSTypeReference' && element.typeName.type === 'Identifier') {
+            lookupName = element.typeName.name;
 
-export type MethodParseResult = {
-    readonly importRefs: Record<string, Reference[]>;
-    readonly exportRefs: Reference[];
-    readonly ambiguousCallSites: {
-        identName: string;
-        start: number;
-        end: number;
-    }[];
-};
+        } else if (element.type === 'TSTypeQuery' && element.exprName.type === 'Identifier') {
+            lookupName = element.exprName.name;
+        }
+
+        console.log('GetDerives: lookupName = ', lookupName);
+
+
+        if (!lookupName) {
+            break;
+        }
+
+        const derive = project.findTrait(file, lookupName);
+        console.log('getDerives', derive?.id);
+
+
+        if (derive) {
+            queuedDerives.push(derive);
+        } else {
+            errors.push(TraitError.RefNotFound(path, lookupName));
+            break;
+        }
+    }
+
+    if (derives.length !== queuedDerives.length) {
+        errors.push(TraitError.InvalidDeriveType());
+        return { valid: false, errors: errors } as const;
+    }
+
+    return { valid: true, derives: queuedDerives } as const;
+}
 
 function parseMethodDependencies(file: TraitFile<FileRegistry>, definition: TraitDefinition, staticProps: Record<string, ObjectProperty>, instanceProps: Record<string, TraitObjectProperty>) {
     const staticDependencies: Record<string, MethodParseResult> = {};
@@ -349,7 +423,6 @@ function parseMethodDependencies(file: TraitFile<FileRegistry>, definition: Trai
         }
 
         const scope = file.scope(method);
-        // const scope = tracker.acquire(method as any);
         // ! exclude globals such as console, require
         const references = checkMethod(file.registry, definition, scope!, method);
 
@@ -584,96 +657,3 @@ function checkMethod(
 //     }
 // }
 
-
-
-export async function parseConfig(cwd: string): Promise<ParsedTraitConfigExport | string> {
-    const NAMES = [
-        'traits.config.ts',
-        'traits.config.js',
-        'trait.config.ts',
-        'trait.config.js'
-    ];
-
-    const configErrorMessage = (type: string, path: string, message: string) => `${pc.red(`ConfigError - ${type}:`)}\n${formatPath(path)}${message}\n`;
-
-    function formatPath(path: string, useFileName?: boolean) {
-        if (useFileName) {
-            let index = path.length - 1;
-            while (index > 0) {
-                const char = path.at(index)!;
-                if (char === '/' || char === '\\') {
-                    index += 1;
-                    break;
-                }
-                index -= 1;
-            }
-
-            path = path.slice(index);
-        }
-
-        return `[ ${path} ]`;
-    }
-
-    let path;
-
-    for (let i = 0; i < NAMES.length; i++) {
-        const p = join(cwd, NAMES[i]!);
-        if (existsSync(p)) {
-            path = p;
-            break;
-        }
-    }
-
-    if (!path) {
-        return configErrorMessage('NoConfigFile', cwd, '\ndirectory has no {trait,traits}.config.{ts,js} file');
-    }
-
-    const module = await import(path);
-    const config = module.default as unknown;
-    const parsed: Partial<ParsedTraitConfigExport> = {
-        cwd: cwd,
-    };
-
-    let errors = '';
-    if (config) {
-        if (typeof config === 'object') {
-
-            parsed.indexFileNameFilter = 'indexFileNameFilter' in config && typeof config.indexFileNameFilter === 'string' ?
-                config.indexFileNameFilter :
-                'index.ts';
-
-            parsed.traitFileNameFilter = 'traitFileNameFilter' in config && typeof config.traitFileNameFilter === 'string' ?
-                config.traitFileNameFilter :
-                '.trait.ts';
-
-            if ('traits' in config) {
-                if (typeof config.traits === 'string') {
-                    const path = join(cwd, config.traits);
-                    if (existsSync(path)) {
-                        parsed.traits = path;
-                        return parsed as ParsedTraitConfigExport;
-                    } else {
-                        errors += configErrorMessage('FileNotFound', path, `\n${pc.yellow('...has a trait entry path')} ${formatPath(path)}\n${pc.yellow('...but no file exists at that path.')}`);
-                    }
-                } else {
-                    errors += configErrorMessage('TraitsFieldTypeNotEqualString', path, `\n${pc.yellow('...')}expected typeof config.traits to equal "string", but was "${typeof config.traits}"`);
-                }
-
-            } else {
-                errors += configErrorMessage('NoTraitsField', path, '\n...expected config.traits field to exist');
-            }
-
-        } else {
-            errors += configErrorMessage('DefaultExportInvalidType', path, `\n...expected default export to be type "object", but was ${typeof config}`);
-        }
-    } else {
-        errors += configErrorMessage('NoDefaultExport', path, '\n...expected a default export.');
-    }
-
-    if (errors.length) {
-        return errors
-    } else {
-        return parsed as ParsedTraitConfigExport;
-    }
-
-}
