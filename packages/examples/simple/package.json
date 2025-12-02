@@ -6,6 +6,10 @@
   "scripts": {
     "register": "bunx traits --register ./"
   },
+  "files": [
+    "src",
+    "traits.config.ts"
+  ],
   "exports": {
     ".": "./src/index.ts",
     "./traits": "./src/traits/index.ts"

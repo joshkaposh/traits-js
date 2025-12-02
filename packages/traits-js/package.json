@@ -3,11 +3,16 @@
   "module": "src/index.ts",
   "version": "0.1.0",
   "type": "module",
+  "scripts": {
+    "build": "bun build ./src/std/index.ts --outdir ./out",
+    "build:watch": "bun build ./src/std/index.ts --outdir ./out --watch"
+  },
   "bin": {
     "traits": "src/bin/traits.bin.ts"
   },
   "exports": {
     ".": "./src/index.ts",
+    "./traits": "./src/std/index.ts",
     "./modifier": "./src/lib/modifier.ts",
     "./config": "./src/lib/config.ts"
   },

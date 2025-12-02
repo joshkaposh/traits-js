@@ -1,5 +1,5 @@
 export * from './flags';
-export * from './meta';
+export * from './trait-definition';
 
 export * from './registry';
 export * from './trait-file';

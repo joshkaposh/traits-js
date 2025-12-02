@@ -2,12 +2,12 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import pc from 'picocolors';
 import { Scope } from 'eslint-scope';
-import { type Function, type ObjectProperty, type ObjectPropertyKind, type TSTypeQuery, type TSTypeReference } from "oxc-parser";
+import { type Function, type Node, type ObjectProperty, type ObjectPropertyKind, type TSTypeQuery, type TSTypeReference } from "oxc-parser";
 import { walk } from "oxc-walker";
 import { TraitDefinition } from "./storage";
 import type { DeclarationRegistry, FileRegistry, Reference } from "./storage/registry";
 import { TraitError } from "./errors";
-import { type TraitAliasDeclaration, type TraitCallExpression, type TraitObjectProperty, type TypeArguments } from "./node";
+import { type TraitAliasDeclaration, type TraitCallExpression, type TraitDeclaration, type TraitObjectProperty, type TypeArguments } from "./node";
 import { TRAIT_FN_NAME } from "./constants";
 import { DEFAULT, Flags, REQUIRED } from "./storage/flags";
 import { addTypeRef, createFilteredExportOrImportNames } from "./helpers";
@@ -127,6 +127,58 @@ export async function parseConfig(cwd: string): Promise<Required<TraitConfig> | 
 
 }
 
+// export function parseTrait() {}
+
+const Parser = {
+    parseTrait(node: Node) {
+        if (node.type !== 'VariableDeclaration') {
+            return;
+        }
+        if (node.kind !== 'const') {
+            // errors[varName] = [TraitError.LetDeclaration()];
+            return
+        }
+
+        const declarator = node.declarations[0];
+
+        // TODO: use importName of "trait" instead of hard-coded here
+        if (declarator && declarator.init?.type === 'CallExpression' && declarator.init.callee.type === 'Identifier' && declarator.init.callee.name === TRAIT_FN_NAME) {
+            const call_expr = declarator.init as TraitCallExpression;
+            const args = call_expr.arguments;
+            const definition_errors: TraitError[] = [];
+
+            if (args.length !== 1) {
+                // console.log('error: invalid trait argument length');
+                definition_errors.push(TraitError.InvalidTraitCallArguments());
+                return true;
+                // errors[varName] = definition_errors;
+                // traits[varName] = new TraitDefinition(call_expr as TraitCallExpression, varName, path, start, end, false, Flags.empty);
+                // continue;
+            }
+
+            // const base = parseType(call_expr.typeArguments.params as TypeArguments['params'], file.code, types);
+            // if (Array.isArray(base)) {
+            // errored = true;
+            // definition_errors.push(...base);
+            // traits[varName] = new TraitDefinition(call_expr, varName, path, start, end, false, Flags.empty)
+            // continue;
+            // }
+
+            // traits[varName] = new TraitDefinition(
+            //     call_expr,
+            //     varName,
+            //     path,
+            //     start,
+            //     end,
+            //     true,
+            //     base,
+            // );
+        }
+    },
+
+    parseImpl() { }
+} as const;
+
 export function parseTraits(file: TraitFile<FileRegistry>) {
     const traits: Record<string, TraitDefinition> = {},
         errors: Record<string, TraitError[]> = {};
@@ -156,25 +208,24 @@ export function parseTraits(file: TraitFile<FileRegistry>) {
                 definition_errors.push(TraitError.InvalidTraitCallArguments());
                 errored = true;
                 errors[varName] = definition_errors;
-                traits[varName] = new TraitDefinition(call_expr as TraitCallExpression, varName, path, start, end, false, Flags.empty);
+                traits[varName] = TraitDefinition.invalid(declaration as TraitDeclaration, varName, path, start, end);
                 continue;
             }
             const base = parseType(call_expr.typeArguments.params as TypeArguments['params'], file.code, types);
             if (Array.isArray(base)) {
                 errored = true;
                 definition_errors.push(...base);
-                traits[varName] = new TraitDefinition(call_expr, varName, path, start, end, false, Flags.empty)
+                traits[varName] = TraitDefinition.invalid(declaration as TraitDeclaration, varName, path, start, end)
                 continue;
             }
 
-            traits[varName] = new TraitDefinition(
-                call_expr,
+            traits[varName] = TraitDefinition.valid(
+                declaration as TraitDeclaration,
                 varName,
                 path,
+                base,
                 start,
                 end,
-                true,
-                base,
             );
         }
     }
@@ -263,16 +314,14 @@ export function parseDefinitionImplementation(file: TraitFile<FileRegistry>, def
         }
         return;
     }
-    definition.initialize(dependencies)
+    definition.initialize(dependencies);
 }
 
 
-function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TraitAliasDeclaration>): Flags | TraitError[] {
+function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TraitAliasDeclaration>): Flags<true> | TraitError[] {
     if (!typeArguments.length) {
-        // console.log('#parseType: no type arguments');
         return [TraitError.EmptyTraitTypeArguments()];
     } else if (typeArguments.length > 2) {
-        // console.log('#parseType: type arguments length greater than 2');
         return [TraitError.InvalidTraitTypeArgument()];
     }
 
@@ -380,16 +429,11 @@ function getDerives(
             lookupName = element.exprName.name;
         }
 
-        console.log('GetDerives: lookupName = ', lookupName);
-
-
         if (!lookupName) {
             break;
         }
 
         const derive = project.findTrait(file, lookupName);
-        console.log('getDerives', derive?.id);
-
 
         if (derive) {
             queuedDerives.push(derive);

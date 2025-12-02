@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
-import type { ResolverFactory } from "oxc-resolver";
+import type { NapiResolveOptions, ResolverFactory } from "oxc-resolver";
 import type { ParseFileResult, ParseFileResultResult } from "./types";
 import { parseSync } from 'oxc-parser';
 
@@ -86,3 +86,14 @@ export async function resolve(
     }
 
 }
+
+export function resolverOptions(resolverOptions?: NapiResolveOptions) {
+    if (!resolverOptions) {
+        resolverOptions = Object.create(null) as NapiResolveOptions;
+    }
+
+    resolverOptions.preferAbsolute = true;
+    resolverOptions.extensions = Array.from(new Set(resolverOptions.extensions ?? []).union(new Set(['.ts'])))
+    return resolverOptions;
+}
+

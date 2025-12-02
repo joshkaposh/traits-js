@@ -1,6 +1,6 @@
 import type { Declaration, ImportNameKind, Program, StaticExportEntry } from "oxc-parser";
 import { is, type TraitAliasDeclaration, type TypeDeclaration } from "../node";
-import type { TraitDefinition } from "./meta";
+import type { TraitDefinition } from "./trait-definition";
 import { walk } from "oxc-walker";
 
 export type Import = {
@@ -137,7 +137,6 @@ export const Registry = {
                 // @ts-expect-error
                 this.vars = vars;
             },
-
             has(name: string) {
                 return name in this.importTypes
                     || name in this.importVars

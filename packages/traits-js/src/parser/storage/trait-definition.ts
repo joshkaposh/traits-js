@@ -1,6 +1,6 @@
-import type { Span, TSTupleElement } from "oxc-parser";
+import type { Declaration, Span, TSTupleElement } from "oxc-parser";
 import { Flags } from "./flags";
-import type { DeriveTupleType, TraitCallExpression, TraitObjectExpression } from "../node";
+import type { DeriveTupleType, TraitCallExpression, TraitDeclaration, TraitObjectExpression } from "../node";
 import type { MethodParseResult } from "../parser";
 
 export type UnknownStatic = Span[]
@@ -19,6 +19,7 @@ export type TraitDefinitionMeta = {
 export class TraitDefinition<Valid extends boolean = boolean> {
     #joined: Flags<Valid>;
     #base: Flags<Valid>;
+    #node: TraitDeclaration;
     #call_expr: TraitCallExpression;
     #uninitDerives: TSTupleElement[];
     #dependencies: {
@@ -36,8 +37,9 @@ export class TraitDefinition<Valid extends boolean = boolean> {
     #valid: boolean;
     #initialized: boolean;
 
-    constructor(
-        call_expr: TraitCallExpression,
+    private constructor(
+        node: TraitDeclaration,
+        // call_expr: TraitCallExpression,
         name: string,
         path: string,
         start: number,
@@ -45,6 +47,8 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         valid: boolean,
         base: Flags<Valid>
     ) {
+        const call_expr = node.declarations[0].init;
+        this.#node = node;
         this.#call_expr = call_expr;
         this.#base = base;
         this.#joined = base.clone();
@@ -61,6 +65,14 @@ export class TraitDefinition<Valid extends boolean = boolean> {
             static: {},
             instance: {}
         };
+    }
+
+    static valid(node: TraitDeclaration, name: string, path: string, flags: Flags<true>, start: number, end: number): TraitDefinition<true> {
+        return new TraitDefinition<true>(node, name, path, start, end, true, flags);
+    }
+
+    static invalid(node: Declaration, name: string, path: string, start: number, end: number): TraitDefinition<false> {
+        return new TraitDefinition<false>(node as TraitDeclaration, name, path, start, end, false, Flags.empty as Flags<false>);
     }
 
     get valid() {

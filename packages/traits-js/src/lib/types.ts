@@ -42,123 +42,12 @@ export type Type<Target extends ValidClass, TargetTrait> =
     > :
     never;
 
-// Target & (new (...args: ConstructorParameters<Target>) => (InstanceType<Target & I> )) & T : never;
-
-// const FooType = trait<{ foo(): void }>({});
-
-class FooClass2 { }
-
-// const WHAT = impl<typeof FooType, typeof FooClass2>(() => ({
-//     foo() {
-
-//     },
-// }));
-
-// type WhatInst = InstanceType<typeof WHAT>;
-// Impl<ConstructorParameters<Target>, Target & { [K in keyof T]: T[K] }, InstanceType<Target> & InstanceType<T>> : never;
-
-
 export type Self<T> = This<OmitModifiers<T>>;
 
 
 type Normalize<T> = {
     readonly [P in keyof T]-?: T[P] & {};
 };
-
-// export type Impl<Target extends ValidClass, TargetTrait> = TargetTrait extends Trait ?
-//     (new (...args: ConstructorParameters<Target>) => InstanceType<Target> & InstanceType<TargetTrait>) & Target & TargetTrait
-//     :
-//     TargetTrait extends TraitRecord ?
-//     (new (...args: ConstructorParameters<Target>) => InstanceType<Target> & PickInstance<TargetTrait>) & Target & Trait<TargetTrait>
-//     :
-//     never;
-
-
-// type Base<T> = T extends Trait<infer B extends TraitRecord> ? B : never;
-// type Derives<T> = T extends Trait<any, infer D> ? D : {};
-
-// // function traitNew<const T extends Trait>(definition: Definition<Base<T>, Derives<T>>): T {
-// //     return unused(definition);
-// // }
-
-
-// // const FooNew = traitNew<Trait<Foo>>({
-// //     sayHello(name) {
-
-// //     },
-// //     [instance]: {
-// //         defInstFoo() {
-
-// //         },
-// //     }
-// // });
-
-
-// const Iter = traitNew<Trait<Iter>>({
-//     [instance]: {
-//         [Symbol.iterator]() {
-//             return this;
-//         }
-//     }
-// });
-
-// type Instance<T> = {
-//     next(): IteratorResult<T>;
-//     [Symbol.iterator]?(): Iterator<T>;
-// };
-
-// type Iter<T = any> = {
-//     [type]: [T];
-//     [instance]: Instance<T>;
-// };
-
-
-// const BarNew = traitNew<Trait<BarType, Foo>>({
-//     barDef() {
-//         this.FOO;
-//         this.sayHello('');
-//         this.foo1();
-//         this.foo2();
-//         this.barDef();
-//         this.bar();
-//     },
-//     [instance]: {
-//         barDefInst() {
-//             this.defInstFoo();
-//             this.instFoo();
-//             this.barDefInst();
-//         },
-//     }
-// });
-
-// class IterMe {
-
-//     static {
-
-//         impl<typeof Iter, typeof IterMe>((self) => ({
-//             [instance]: {
-//                 next() {
-//                     if (self.prototype.#len) {
-//                         self.prototype.#len -= 1;
-//                         return { done: false, value: this }
-//                     } else {
-//                         return { done: true, value: void 0 }
-//                     }
-//                 },
-//             }
-//         }));
-//     }
-
-
-//     #len: number;
-//     constructor(len: number) {
-//         this.#len = len;
-//     }
-// }
-
-// type UnionToIntersection<U> =
-//     (U extends any ? (k: U) => void : never) extends ((k: infer I) => void) ? I : never;
-
 
 type GetRequireds<T> = RequiredMethodsFor<T> & Partial<DefaultMethodsFor<T>>;
 type InstanceRequireds<Base, Derives> =
@@ -221,16 +110,12 @@ type DefaultInstanceMethods<Base, Derives> =
     ) :
     {};
 
-
 export type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitRecord = {}> = T extends [infer Current, ...infer Rest] ? GetTraitRecordsFromDerives<Rest, Merged & (
     Current extends Trait<infer Base, infer Derives> ?
     Derives & Base :
     Current extends TraitRecord ? Current :
     never
 )> : Merged;
-
-
-
 
 export type Definition<Base, Derives = {}> = OrEmptyObj<DefaultMethodsFor<Base> & DefaultInstanceMethods<Base, Derives>> & Self<Base & Derives>
 
@@ -243,16 +128,16 @@ export type Implementation<T> =
     T extends TraitRecord ? IntoImpl<T, {}> :
     'Error: if you are seeing this, you tried passing a type that was not created from `trait` to `impl`. `impl` may only receive `TraitClass`(s) and / or `TraitRecord`(s)';
 
-type Foo = {
-    FOO: number;
-    foo1(): void;
-    foo2(): void;
-    sayHello?(name: string): void;
-    [instance]: {
-        instFoo(): void;
-        defInstFoo?(): void;
-    }
-};
+// type Foo = {
+//     FOO: number;
+//     foo1(): void;
+//     foo2(): void;
+//     sayHello?(name: string): void;
+//     [instance]: {
+//         instFoo(): void;
+//         defInstFoo?(): void;
+//     }
+// };
 
 // const Foo = trait<Foo>({
 //     sayHello(_name) { },
@@ -452,10 +337,10 @@ type Foo = {
 //     // },
 // });
 
-class FooClass {
-    static himom = 'himom' as const;
-    hidad = 'hidad' as const;
-}
+// class FooClass {
+//     static himom = 'himom' as const;
+//     hidad = 'hidad' as const;
+// }
 
 // const FooClassDerivesFooTrait = impl<typeof Foo, typeof FooClass>((self) => ({
 //     FOO: 1,

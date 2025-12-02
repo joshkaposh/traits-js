@@ -1,52 +1,54 @@
-import { type TSTypeQuery, type TSTypeReference } from "oxc-parser";
 import { ResolverFactory, type NapiResolveOptions } from "oxc-resolver";
 import { dirname } from 'node:path';
-import { checkParseResult, resolve } from "./resolve";
-import { TraitDefinition } from "./storage";
+import { checkParseResult, resolve, resolverOptions } from "./resolve";
 import { TraitFile } from "./storage/trait-file";
 import { Registry, type FileRegistry } from "./storage/registry";
 import { print, timestamp } from "./helpers";
 import { Stack, type VisitFn } from "./stack";
-import { TraitError } from "./errors";
 import { parseDefinitionImplementation, parseDerives, parseConfig, parseTraits } from "./parser";
-import type { ParseFileResultResult } from "./types";
+import type { TraitConfig } from "../lib/config";
+import type { ParseFileResult } from "./types";
 
-export type ProjectOptions = {
-    cwd: string,
-    resolverOptions?: NapiResolveOptions,
+export type ProjectOptions = Pick<Required<TraitConfig>, 'cwd' | 'indexFileNameFilter' | 'traitFileNameFilter'> & {
+    resolverOptions?: NapiResolveOptions;
     verbose?: boolean;
 };
 
 let VERBOSE = false;
 
 export class Project {
+    #config: TraitConfig;
     #cwd: string;
     #resolver: ResolverFactory;
     #files: TraitFile[];
     #ids: Record<string, number>;
 
-    #traitFileNameFilter!: string;
-    #indexFileNameFilter!: string;
+    #traitFileNameFilter: string;
+    #indexFileNameFilter: string;
 
-    constructor(options: ProjectOptions) {
-        const { cwd } = options;
-        const resolverOptions = options.resolverOptions ??= Object.create(null) as NapiResolveOptions;
-        resolverOptions.preferAbsolute = true;
-        resolverOptions.extensions = Array.from(new Set(resolverOptions.extensions ?? []).union(new Set(['.ts'])))
+    #dependencies: Record<string, Project>;
+
+    private constructor(
+        config: Required<TraitConfig>,
+        resolver: ResolverFactory
+    ) {
+        const { cwd } = config;
 
         console.log('Project root: ', cwd);
 
-
-        VERBOSE = options.verbose ?? false;
-
-        if (VERBOSE) {
-            print('Project', `cwd = ${cwd}`);
-        }
-
-        this.#resolver = new ResolverFactory(resolverOptions);
+        this.#resolver = resolver;
         this.#files = [];
         this.#ids = {};
+        this.#dependencies = {};
         this.#cwd = cwd;
+        this.#config = config;
+        this.#indexFileNameFilter = config.indexFileNameFilter;
+        this.#traitFileNameFilter = config.traitFileNameFilter;
+    }
+
+    static async new(projectRoot: string, resolver = new ResolverFactory(resolverOptions())) {
+        const config = await getEntry(projectRoot);
+        return new Project(config, resolver);
     }
 
     get cwd() {
@@ -97,26 +99,59 @@ export class Project {
 
     async #createStackFromProjectEntry() {
         const then = performance.now();
-        const { traits, traitFileNameFilter, indexFileNameFilter } = await this.#getEntry();
-
-        this.#indexFileNameFilter = indexFileNameFilter;
-        this.#traitFileNameFilter = traitFileNameFilter;
+        const { traits, indexFileNameFilter } = await getEntry(this.#cwd);
 
         const resolver = this.#resolver;
         const result = await resolve(resolver, traits, indexFileNameFilter);
+
         checkParseResult(result, traits);
 
-        if (result.packageJson) {
-            const json = await Bun.file(result.packageJson).json() as Record<string, any>;
-            if ('traits-js' in json.devDependencies) {
-                // const modifierPath = resolver.sync(this.#cwd, 'traits-js/modifier');
-                // console.log(modifierPath.path);
-            }
-        }
+        await this.#loadDependencies(resolver, result.packageJson);
+
 
         const s = new Stack<TraitFile>(result.path, new TraitFile(result, Registry.Index()));
         timestamp('resolve-entry', then);
         return s;
+    }
+
+    async #loadDependencies(resolver: ResolverFactory, rootPackageJsonPath: string | undefined) {
+        if (rootPackageJsonPath) {
+            const root = this.#cwd;
+            const json = await Bun.file(rootPackageJsonPath).json() as Record<string, any>;
+            console.log('checking for dependencies...');
+            const dependencies = this.#dependencies;
+
+            const deps = (await depsFor(resolver, root, json.devDependencies)).concat(
+                await depsFor(resolver, root, json.dependencies)
+            )
+            //     .filter((v => typeof v[0] !== 'string')).map(new Project({
+            //     cwd: (v[1] as Required<TraitConfig>).cwd,
+
+            // }));
+
+            // this.#dependencies = Object.fromEntries(deps);
+            console.log('Dependencies: ', dependencies);
+
+
+            // for (const packageName in deps) {
+            //     const dep = deps[packageName]!;
+            //     if (resolver.sync(root, `${dep}/traits`)) {
+            //         console.log('Found dependecy: ', packageName);
+
+            //     }
+
+            // }
+
+            // if ('traits-js' in json.dependencies) {
+
+            // }
+
+            //             if ('traits-js' in json.devDependencies) {
+            //     const modifierPath = resolver.sync(this.#cwd, 'traits-js/modifier');
+            //     // console.log(modifierPath.path);
+            // }
+
+        }
     }
 
     async #dfsSourceFiles(stack: Stack<TraitFile>) {
@@ -143,9 +178,6 @@ export class Project {
             }
 
             file.init();
-
-            console.log('init: ', file.name);
-
 
             const { traits,
                 errors,
@@ -179,9 +211,9 @@ export class Project {
                 continue
             }
 
-            for (const trait of file.traits()) {
-                console.log('%s - %s = ', file.name, trait.name, trait.valid);
-            }
+            const traits = Object.fromEntries(file.traits().map(t => [t.name, t.valid]));
+
+            console.log('%s = %O', file.name, traits);
         }
 
         console.log(timestamp('initialize', then));
@@ -236,14 +268,81 @@ export class Project {
         }
     }
 
-    async #getEntry() {
-        const entryOrError = await parseConfig(this.#cwd);
-        if (typeof entryOrError === 'string') {
-            console.log(entryOrError);
-            process.exit(1);
+}
+
+
+
+async function depsFor(resolver: ResolverFactory, root: string, dependencies: Record<string, string> = {}) {
+    const deps: [string, string | Required<TraitConfig>][] = [];
+    for (const name in dependencies) {
+        const result = resolver.sync(root, name);
+        if (result.packageJsonPath) {
+            const path = result.packageJsonPath.slice(0, result.packageJsonPath.length - 'package.json'.length)
+            // console.log('DEPS!!', result.path);
+
+            // TODO: figure out how to find 'traits.config.ts' in node_modules
+
+
+            // const config = await parseConfig(
+            //     result.packageJsonPath.slice(0, result.packageJsonPath.length - 'package.json'.length
+            //     )
+            // );
+
+            console.log(await parseConfig(path));
+            deps.push([name, path]);
         }
-        return entryOrError;
     }
+
+    return deps;
+
+}
+
+
+async function getEntry(root: string) {
+    const entryOrError = await parseConfig(root);
+    if (typeof entryOrError === 'string') {
+        console.log(entryOrError);
+        process.exit(1);
+    }
+    return entryOrError;
+}
+
+async function getDepsOfProject(resolver: ResolverFactory, root: string, packageJsonPath: string) {
+    const projects = [];
+    const ids: Record<string, number> = {};
+
+    if (packageJsonPath) {
+        const json = await Bun.file(packageJsonPath).json() as Record<string, any>;
+
+        const deps = json.dependencies as Record<string, string>;
+        console.log('checking for dependencies...');
+
+
+        const dependencies = Object.fromEntries(Object.keys(deps).map((name) => [name, resolver.sync(root, `${name}/traits`)]))
+        console.log('Project dependencies: ', dependencies);
+
+
+        // for (const packageName in deps) {
+        //     const dep = deps[packageName]!;
+        //     if (resolver.sync(root, `${dep}/traits`)) {
+        //         console.log('Found dependecy: ', packageName);
+
+        //     }
+
+        // }
+
+        // if ('traits-js' in json.dependencies) {
+
+        // }
+
+        //             if ('traits-js' in json.devDependencies) {
+        //     const modifierPath = resolver.sync(this.#cwd, 'traits-js/modifier');
+        //     // console.log(modifierPath.path);
+        // }
+
+    }
+
+
 }
 
 
@@ -258,6 +357,8 @@ function createVisitFn(
         const id = files.length;
         files.push(file);
         ids[file.path] = id;
+        console.log('new file: ', file.path);
+
 
         const directory = file.directory,
             registry = file.registry;

@@ -11,10 +11,6 @@ export class TraitFile<R extends Registry = Registry> {
 
     #registry: R;
     #tracker!: eslintScope.ScopeManager;
-
-    #types: DeclarationRegistry<TSTypeAliasDeclaration | TSInterfaceDeclaration>
-    #vars: DeclarationRegistry;
-    #traits: ReadOnlyDict<TraitDefinition>;
     #isIndex: boolean;
     #size: number;
 
@@ -22,9 +18,6 @@ export class TraitFile<R extends Registry = Registry> {
         this.#result = result;
         this.#registry = registry;
         this.#isIndex = registry.type === 'index';
-        this.#types = {};
-        this.#vars = {};
-        this.#traits = {};
         this.#size = 0;
     }
 
@@ -94,12 +87,13 @@ export class TraitFile<R extends Registry = Registry> {
     setTraits(
         traits: Record<string, TraitDefinition>
     ) {
-        this.#traits = traits;
+        // @ts-expect-error
+        this.#registry.traits = traits;
         this.#size = Object.keys(traits).length
     }
 
     get(bindingName: string) {
-        const t = this.#traits[bindingName];
+        const t = this.#registry.traits[bindingName];
         if (t) {
             return {
                 name: t.name,
@@ -115,7 +109,7 @@ export class TraitFile<R extends Registry = Registry> {
     }
 
     trait(name: string) {
-        return this.#traits[name];
+        return this.#registry.traits[name];
     }
 
     ids(): IteratorObject<string> {
@@ -123,14 +117,14 @@ export class TraitFile<R extends Registry = Registry> {
     }
 
     *names(): Generator<string> {
-        for (const key in this.#traits) {
+        for (const key in this.#registry.traits) {
             yield key;
         }
     }
 
     *traits(): Generator<TraitDefinition> {
-        for (const key in this.#traits) {
-            yield this.#traits[key]!;
+        for (const key in this.#registry.traits) {
+            yield this.#registry.traits[key]!;
         }
     }
 
