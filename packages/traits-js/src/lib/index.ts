@@ -3,7 +3,9 @@ import type { Definition, GetTraitRecordsFromDerives, Implementation, Trait, Tra
 
 export * from './modifier';
 
-export type { Trait, IntoTrait, Type, Definition, } from './types';
+export type * from './types';
+
+export type { ValidClass, Prettify, EmptyObject } from './helper-types';
 
 export function as<T>(): T {
     return void 0 as unknown as T;
@@ -99,6 +101,3 @@ export function impl<const T, const Self extends ValidClass = ValidClass>(
 ): Type<Self, T> {
     return unused(Class);
 }
-
-
-// export { trait, impl } from './types';

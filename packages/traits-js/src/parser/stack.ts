@@ -60,6 +60,12 @@ export class Stack<D = any, K extends any = string> {
         this.#stack.length = 0;
     }
 
+    // reset(initialKey: K, initialValue: D) {
+    //     this.clear();
+    //     this.#ids.add(initialKey);
+    //     this.#stack.push(initialValue);
+    // }
+
     peek(): D | undefined {
         return this.#stack.at(-1);
     }
