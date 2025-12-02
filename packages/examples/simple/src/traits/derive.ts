@@ -1,4 +1,4 @@
-import { derive, instance, trait, type Derive, type Infer } from "traits-js";
+import { impl, instance, trait, type Derive } from "traits-js";
 
 const FooTrait = trait<{
     foo(): void;
@@ -10,29 +10,32 @@ const FooTrait = trait<{
     fooBar() {
 
     },
-    [instance]: {}
+    // [instance]: {}
 });
 
-type FooTrait = Infer<typeof FooTrait>;
 
-const FooDerived = derive<[FooTrait]>({
-    foo() { },
-    [instance]: {
-        foo() { }
-    }
+
+const BarTrait = trait<{ bar(): void }, [typeof FooTrait]>({
+    // fooBar() { },
+    // [instance]: {}
 });
 
-type BarTrait = Infer<typeof BarTrait>;
-const BarTrait = trait<Derive<[FooTrait], { bar(): void }>>({
-    fooBar() { },
-    [instance]: {}
-});
 
-const BarDerived = derive<[BarTrait]>({
+
+const BarDerived = impl<typeof BarTrait>(() => ({
     foo() { },
     bar() { },
     [instance]: {
         foo() { },
     }
-})
+}))
+
+
+// const FooDerived = impl<typeof FooTrait>(() => ({
+//     foo() { },
+//     [instance]: {
+//         foo() { }
+//     }
+// }));
+
 

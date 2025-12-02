@@ -23,12 +23,6 @@ export const arrowOuterObject = {};
 
 export const switchObject = {};
 
-const A = trait<{ a(): void }>({});
-const B = trait<{ b(): void }>({});
-const C = trait<{ c(): void }>({});
-
-const D = trait<{ d(): void }, [typeof A, typeof B, typeof C]>({});
-
 
 export const Bar = trait<BarType>({
     defaultStaticBar(obj: Trait<any>, obj2: ReturnType<typeof trait<FooBarBaz>>, obj3: IntoTrait<Derive<BarType, []>>) {
@@ -51,29 +45,6 @@ export const Bar = trait<BarType>({
 
 
         localFunction(trait);
-    },
-});
-
-export const Bar1 = trait<{
-    bar1?(): void;
-    bar?<T extends string>(str: T): T;
-}, [typeof FooType]>({
-    bar(str) {
-        this.CONSTANT;
-        return str;
-    },
-    bar1() { },
-});
-
-export const Bar2 = trait<{ bar2?(obj: any): void, bar?(n: number): void }, [typeof Bar1, typeof Bar]>({
-    bar2() {
-        this.bar1();
-        this.requiredStaticBar();
-        this.defaultStaticBar({} as never);
-    },
-    bar() {
-        this.bar(0);
-        this.bar('');
     },
 });
 
