@@ -6,6 +6,10 @@
   "scripts": {
     "register": "bunx traits --register ./"
   },
+  "exports": {
+    ".": "./src/index.ts",
+    "./traits": "./src/traits/index.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "traits-js": "workspace:*"
