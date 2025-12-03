@@ -1,9 +1,10 @@
-import type { instance } from "../lib";
-import { impl, trait, type Trait, type ValidClass } from "../lib";
+import { trait, type instance } from "../lib";
 
-export type Clone<T extends ValidClass = ValidClass> = {
+export type Instance<T> = T extends new (...args: any[]) => infer I ? I : T;
+
+export type Clone<T = unknown> = {
     [instance]: {
-        clone(): T;
+        clone(): Instance<T>;
     }
 };
 

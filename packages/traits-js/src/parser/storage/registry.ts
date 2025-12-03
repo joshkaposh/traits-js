@@ -51,6 +51,157 @@ export type DeclarationRegistry<T extends Declaration = Declaration> = Record<st
 export type FileRegistry = ReturnType<typeof Registry['File']>;
 export type IndexRegistry = ReturnType<typeof Registry['Index']>;
 export type Registry = { [K in keyof typeof Registry]: ReturnType<typeof Registry[K]> }[keyof typeof Registry];
+
+
+class FileRegistry2 {
+    readonly type = 'file';
+    importTypes = {} as ImportRegistry;
+    importVars = {} as ImportRegistry;
+    exportTypes = {} as LocalExportRegistry;
+    exportVars = {} as LocalExportRegistry;
+    types = {} as DeclarationRegistry<TypeDeclaration>;
+    vars = {} as DeclarationRegistry;
+    traits = {} as Record<string, TraitDefinition>;
+    store(ast: Program, path: string) {
+
+        const exportVars = this.exportVars, exportTypes = this.exportTypes;
+        const types: DeclarationRegistry<TypeDeclaration> = {}, vars: DeclarationRegistry = {};
+
+        walk(ast, {
+            enter(node, parent) {
+                if (parent && is.declaredInModule(parent, node)) {
+                    if (
+                        is.constVariableDeclaration(node)
+                        && node.declarations[0].id.name in exportVars
+                    ) {
+                        vars[node.declarations[0].id.name] = {
+                            node,
+                            start: parent.start,
+                            end: parent.end,
+                        };
+
+                    } else if (
+                        (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
+                        && node.id
+                    ) {
+                        const name = node.id.name;
+                        vars[name] = {
+                            node,
+                            start: parent.start,
+                            end: parent.end,
+                        };
+
+                    } else if (
+                        node.type === 'TSTypeAliasDeclaration'
+                        && node.typeAnnotation.type === 'TSTypeLiteral'
+                    ) {
+                        const typeDeclarationName = node.id.name;
+                        if (!(typeDeclarationName in exportTypes)) {
+                            console.error('trait files must export all type declarations');
+                            console.log(`${path}`);
+                            console.error(`declared a private type ${typeDeclarationName}\n`);
+                            return;
+                        }
+
+                        types[node.id.name] = {
+                            node: node as TraitAliasDeclaration,
+                            start: node.start,
+                            end: node.end,
+                        };
+                    }
+                }
+            },
+
+        });
+
+        this.types = types;
+        this.vars = vars;
+    }
+    has(name: string) {
+        return name in this.importTypes
+            || name in this.importVars
+            || name in this.exportTypes
+            || name in this.exportVars
+    }
+    hasType(name: string) {
+        return name in this.importTypes
+            || name in this.exportTypes
+    }
+    get(name: string): Reference | undefined {
+        let importRef = this.importTypes[name];
+        if (importRef) {
+            return {
+                name: name,
+                isType: true,
+                isLocal: false,
+                isTrait: false,
+                moduleRequest: importRef.moduleRequest,
+            }
+        }
+
+        importRef = this.importVars[name];
+        if (importRef) {
+            return {
+                name: name,
+                isType: false,
+                isLocal: false,
+                isTrait: false,
+                moduleRequest: importRef.moduleRequest,
+            }
+        }
+
+        if (name in this.traits) {
+            return {
+                name: name,
+                isType: false,
+                isLocal: true,
+                isTrait: true,
+                definition: this.traits[name]!
+            }
+        }
+
+        if (name in this.exportTypes) {
+            return {
+                name: name,
+                isType: true,
+                isLocal: true,
+                isTrait: false,
+
+            }
+        } else if (name in this.exportVars) {
+            return {
+                name: name,
+                isType: false,
+                isLocal: true,
+                isTrait: false,
+
+            }
+        }
+
+    }
+    getType(name: string): Reference | undefined {
+        const importRef = this.importTypes[name];
+        if (importRef) {
+            return {
+                name: name,
+                isType: true,
+                isLocal: false,
+                isTrait: false,
+                moduleRequest: importRef.moduleRequest,
+            }
+        }
+
+        if (name in this.exportTypes) {
+            return {
+                name: name,
+                isType: true,
+                isLocal: true,
+                isTrait: false,
+            }
+        }
+    }
+}
+
 export const Registry = {
     Index() {
         return {

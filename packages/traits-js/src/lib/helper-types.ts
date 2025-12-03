@@ -6,7 +6,7 @@ export type Prettify<T> = { [K in keyof T]: T[K] } & {}
 /** Any object such as `{}` */
 export type EmptyObject = Record<PropertyKey, never>;
 
-export type ValidClass<A extends any[] = never, I extends object = object> = new (...args: A) => I;
+export type ValidClass<A extends any[] = any[], I extends object = object> = new (...args: A) => I;
 
 export type This<T> = ThisType<{
     readonly [P in keyof T]-?: T[P] & {};

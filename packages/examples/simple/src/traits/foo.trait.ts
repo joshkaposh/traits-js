@@ -1,4 +1,5 @@
 import { instance, trait, impl } from 'traits-js';
+import { Clone } from 'traits-js/traits';
 
 export const Foo = trait<{
     CONSTANT: number;
@@ -28,6 +29,16 @@ export const Simple = trait<{
     method(): void;
     [instance]: { method(param: number): void }
 }>({});
+
+export const UsesOtherPackage = trait<{}, [Clone<typeof SomeClass>]>({});
+
+impl<typeof UsesOtherPackage>(() => ({
+    [instance]: {
+        clone() {
+            return new SomeClass();
+        },
+    }
+}))
 
 export class SomeClass {
     static someProp = 1;

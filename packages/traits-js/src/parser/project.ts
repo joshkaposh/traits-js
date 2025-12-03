@@ -1,20 +1,18 @@
 import { ResolverFactory, type NapiResolveOptions, type ResolveResult } from "oxc-resolver";
-import { dirname } from 'node:path';
+import { dirname, normalize } from 'node:path';
 import { checkParseResult, resolve, resolverOptions } from "./resolve";
 import { TraitFile } from "./storage/trait-file";
 import { Registry, type FileRegistry } from "./storage/registry";
-import { print, timestamp } from "./helpers";
+import { timestamp } from "./helpers";
 import { Stack, type VisitFn } from "./stack";
-import { parseDefinitionImplementation, parseDerives, parseConfig, parseTraits } from "./parser";
+import { parseDefinition, parseDerives, parseConfig, parseTraits } from "./parser";
 import type { TraitConfig } from "../lib/config";
-import type { ParseFileResult } from "./types";
+import type { ParseFileResultResult } from "./types";
 
 export type ProjectOptions = Pick<Required<TraitConfig>, 'cwd' | 'indexFileNameFilter' | 'traitFileNameFilter'> & {
     resolverOptions?: NapiResolveOptions;
     verbose?: boolean;
 };
-
-let VERBOSE = false;
 
 export class Project {
     #config: TraitConfig;
@@ -55,6 +53,10 @@ export class Project {
         return this.#cwd;
     }
 
+    get packageJsonPath() {
+        return '';
+    }
+
     get resolver() {
         return this.#resolver;
     }
@@ -67,28 +69,28 @@ export class Project {
         return this.#traitFileNameFilter;
     }
 
-
-    // loadDependencies(packageJson: string) {
-
-    // }
-
-    async init() {
+    async initialize() {
         const stack = await this.#createStackFromProjectEntry();
-        // const stack = new Stack<TraitFile>();
         //* initialize any dependencies this project has before parsing the project itself
         const deps = this.#dependencies;
         for (const packageName in deps) {
-            const project = deps[packageName]!;
-            await project.init();
+            deps[packageName]!.initialize();
         }
+
         await this.#dfsSourceFiles(stack);
 
         this.#initialize(this.#files);
     }
 
     file(path: string): TraitFile | undefined {
-        const index = this.#ids[path];
-        return index == null ? void 0 : this.#files[index];
+        if (path.startsWith(this.#cwd)) {
+            const index = this.#ids[path];
+            return index == null ? void 0 : this.#files[index];
+        }
+    }
+
+    nodeModule(name: string, path: string) {
+
     }
 
     /**
@@ -107,18 +109,17 @@ export class Project {
         }
     }
 
-    // resetStack(stack: Stack<TraitFile>) {
-    //     stack.reset();
-    // }
-
     async #createStackFromProjectEntry() {
         const then = performance.now();
         const { traits, indexFileNameFilter } = await getEntry(this.#cwd);
 
         const resolver = this.#resolver;
         const result = await resolve(resolver, traits, indexFileNameFilter);
-
         checkParseResult(result, traits);
+
+        result.packageJson;
+
+        // this.#entry = result;
 
         await this.#loadDependencies(resolver, result.packageJson);
 
@@ -140,7 +141,6 @@ export class Project {
                 );
 
             this.#dependencies = Object.fromEntries(deps.map(d => [d[0], new Project(d[1].config, resolver)]));
-            // console.log('Dependencies: ', this.#dependencies);
 
             //             if ('traits-js' in json.devDependencies) {
             //     const modifierPath = resolver.sync(this.#cwd, 'traits-js/modifier');
@@ -170,9 +170,7 @@ export class Project {
                 continue
             }
 
-            // console.log('PROJECT PARSE: ', file.path);
-
-            file.init();
+            file.initialize();
 
             const { traits,
                 errors,
@@ -195,7 +193,7 @@ export class Project {
             const traits = file.traits();
             for (const trait of traits) {
                 if (trait.valid) {
-                    parseDefinitionImplementation(file as TraitFile<FileRegistry>, trait);
+                    parseDefinition(file as TraitFile<FileRegistry>, trait);
                 }
             }
         }
@@ -237,6 +235,20 @@ export class Project {
         }
     }
 
+    #findProject(moduleRequest: string) {
+        console.log('searching for [ %s ]...', moduleRequest);
+
+        for (const packageName in this.#dependencies) {
+            const project = this.#dependencies[packageName]!;
+            const root = project.#cwd;
+            console.log(root.endsWith(normalize(`${moduleRequest}/`)));
+            return project;
+            // if (project.#cwd.endsWith(moduleRequest)) {
+            //     return project;
+            // }
+        }
+    }
+
     #resolveImportedTrait(file: TraitFile<FileRegistry>, localName: string) {
         const importVar = file.registry.importVars[localName];
         if (!importVar) {
@@ -246,29 +258,62 @@ export class Project {
         const resolvedRequest = this.resolver.sync(dirname(file.path), importVar.moduleRequest);
 
         if (resolvedRequest.path) {
-            if (resolvedRequest.path.startsWith(this.#cwd)) {
-                const previous = this.file(resolvedRequest.path);
-                if (previous) {
-                    const resolvedName = importVar.localToImport;
-                    if (resolvedName) {
-                        return previous.trait(resolvedName);
+            const foreign = !resolvedRequest.path.startsWith(this.#cwd);
+
+            console.log('RESOLVE IMPORT: ', foreign, localName);
+
+
+            const resolvedName = importVar.localToImport;
+            if (resolvedName) {
+                if (foreign) {
+
+                    // TODO: use `packageJsonPath` instead of this nonsense
+                    // TODO: for looking up projects
+
+                    let index = Infinity;
+                    for (let i = 0; i < importVar.moduleRequest.length; i++) {
+                        const char = importVar.moduleRequest[i]!;
+                        if (char === '/' || char === '\\') {
+                            index = i;
+                            break;
+                        }
                     }
+
+                    if (index < importVar.moduleRequest.length) {
+                        const name = importVar.moduleRequest.slice(0, index);
+                        // console.log('REQ PATH: ', resolvedRequest.path);
+
+                        const project = this.#findProject(name);
+                        // console.log('project files::', project ? project.#files.map(f => f.path) : 'N/A');
+
+                        if (project) {
+                            const files = project.#files;
+                            for (let i = 0; i < files.length; i++) {
+                                const trait = files[i]!.trait(resolvedName)
+                                if (trait) {
+                                    return trait;
+                                }
+                            }
+                        }
+
+                        return project?.file(resolvedRequest.path)?.trait(resolvedName);
+                    }
+
+                    // return this.#findProject(importVar.moduleRequest)?.file(resolvedRequest.path)?.trait(resolvedName);
+                    // return this.#dependencies[importVar.moduleRequest]?.file(resolvedRequest.path)?.trait(resolvedName);
+                    // importVar.moduleRequest
+                } else {
+                    return this.file(resolvedRequest.path)?.trait(resolvedName);
                 }
-            } else {
-                // TODO: node_module:
-                // * if unparsed:
-                // * 1. check directory of package.json for {trait,traits}.json or {trait,traits}.data.json
-                // * 2. parse and if successful, add to cache for future lookups
+
             }
         }
     }
 
 }
 
-
-
 async function packageMetadata(resolver: ResolverFactory, root: string, dependencies: Record<string, string> = {}) {
-    const deps: [string, { root: string; result: ResolveResult, config: Required<TraitConfig> }][] = [];
+    const deps: [name: string, { root: string; result: ResolveResult, config: Required<TraitConfig> }][] = [];
     for (const name in dependencies) {
         const result = resolver.sync(root, name);
         if (result.packageJsonPath) {
@@ -297,34 +342,6 @@ async function getEntry(root: string) {
     }
     return entryOrError;
 }
-
-async function getDepsOfProject(resolver: ResolverFactory, root: string, packageJsonPath: string) {
-    const projects = [];
-    const ids: Record<string, number> = {};
-
-    if (packageJsonPath) {
-        const json = await Bun.file(packageJsonPath).json() as Record<string, any>;
-
-        const deps = json.dependencies as Record<string, string>;
-        // console.log('checking for dependencies...');
-
-
-        const dependencies = Object.fromEntries(Object.keys(deps).map((name) => [name, resolver.sync(root, `${name}/traits`)]))
-
-        // if ('traits-js' in json.dependencies) {
-
-        // }
-
-        //             if ('traits-js' in json.devDependencies) {
-        //     const modifierPath = resolver.sync(this.#cwd, 'traits-js/modifier');
-        //     // console.log(modifierPath.path);
-        // }
-
-    }
-
-
-}
-
 
 function createVisitFn(
     resolver: ResolverFactory,

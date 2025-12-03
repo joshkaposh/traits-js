@@ -2,71 +2,52 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import pc from 'picocolors';
 import { Scope } from 'eslint-scope';
-import { type Function, type Node, type ObjectProperty, type ObjectPropertyKind, type TSTypeQuery, type TSTypeReference } from "oxc-parser";
+import { type Function, type ObjectProperty, type ObjectPropertyKind, type TSTypeQuery, type TSTypeReference } from "oxc-parser";
 import { walk } from "oxc-walker";
 import { TraitDefinition } from "./storage";
 import type { DeclarationRegistry, FileRegistry, Reference } from "./storage/registry";
 import { TraitError } from "./errors";
 import { type TraitAliasDeclaration, type TraitCallExpression, type TraitDeclaration, type TraitObjectProperty, type TypeArguments } from "./node";
-import { TRAIT_FN_NAME } from "./constants";
+import { CONFIG_NAMES, DEFAULT_INDEX_FILTER, DEFAULT_TRAIT_FILTER, TRAIT_FN_NAME } from "./constants";
 import { DEFAULT, Flags, REQUIRED } from "./storage/flags";
 import { addTypeRef, createFilteredExportOrImportNames } from "./helpers";
 import type { TraitFile } from "./storage/trait-file";
 import type { Project } from "./project";
 import type { TraitConfig } from "../lib/config";
 
+type AmbiguousCallSite = { identName: string; start: number; end: number };
+
 export type CheckMethodResult = {
     readonly importRefs: Record<string, Reference[]>;
     readonly exportRefs: Reference[];
-    readonly ambiguousCallSites: {
-        identName: string;
-        start: number;
-        end: number;
-    }[];
+    readonly ambiguousCallSites: AmbiguousCallSite[];
 }
 
-export type MethodParseResult = {
-    readonly importRefs: Record<string, Reference[]>;
-    readonly exportRefs: Reference[];
-    readonly ambiguousCallSites: {
-        identName: string;
-        start: number;
-        end: number;
-    }[];
-};
+const configErrorMessage = (type: string, path: string, message: string) => `${pc.red(`ConfigError - ${type}:`)}\n${formatPath(path)}${message}\n`;
 
-export async function parseConfig(cwd: string): Promise<Required<TraitConfig> | string> {
-    const NAMES = [
-        'traits.config.ts',
-        'traits.config.js',
-        'trait.config.ts',
-        'trait.config.js'
-    ];
-
-    const configErrorMessage = (type: string, path: string, message: string) => `${pc.red(`ConfigError - ${type}:`)}\n${formatPath(path)}${message}\n`;
-
-    function formatPath(path: string, useFileName?: boolean) {
-        if (useFileName) {
-            let index = path.length - 1;
-            while (index > 0) {
-                const char = path.at(index)!;
-                if (char === '/' || char === '\\') {
-                    index += 1;
-                    break;
-                }
-                index -= 1;
+function formatPath(path: string, useFileName?: boolean) {
+    if (useFileName) {
+        let index = path.length - 1;
+        while (index > 0) {
+            const char = path.at(index)!;
+            if (char === '/' || char === '\\') {
+                index += 1;
+                break;
             }
-
-            path = path.slice(index);
+            index -= 1;
         }
 
-        return `[ ${path} ]`;
+        path = path.slice(index);
     }
 
+    return `[ ${path} ]`;
+}
+
+export async function parseConfig(cwd: string): Promise<Required<TraitConfig> | string> {
     let path;
 
-    for (let i = 0; i < NAMES.length; i++) {
-        const p = join(cwd, NAMES[i]!);
+    for (let i = 0; i < CONFIG_NAMES.length; i++) {
+        const p = join(cwd, CONFIG_NAMES[i]!);
         if (existsSync(p)) {
             path = p;
             break;
@@ -86,14 +67,13 @@ export async function parseConfig(cwd: string): Promise<Required<TraitConfig> | 
     let errors = '';
     if (config) {
         if (typeof config === 'object') {
-
             parsed.indexFileNameFilter = 'indexFileNameFilter' in config && typeof config.indexFileNameFilter === 'string' ?
                 config.indexFileNameFilter :
-                'index.ts';
+                DEFAULT_INDEX_FILTER;
 
             parsed.traitFileNameFilter = 'traitFileNameFilter' in config && typeof config.traitFileNameFilter === 'string' ?
                 config.traitFileNameFilter :
-                '.trait.ts';
+                DEFAULT_TRAIT_FILTER;
 
             if ('traits' in config) {
                 if (typeof config.traits === 'string') {
@@ -127,58 +107,6 @@ export async function parseConfig(cwd: string): Promise<Required<TraitConfig> | 
 
 }
 
-// export function parseTrait() {}
-
-const Parser = {
-    parseTrait(node: Node) {
-        if (node.type !== 'VariableDeclaration') {
-            return;
-        }
-        if (node.kind !== 'const') {
-            // errors[varName] = [TraitError.LetDeclaration()];
-            return
-        }
-
-        const declarator = node.declarations[0];
-
-        // TODO: use importName of "trait" instead of hard-coded here
-        if (declarator && declarator.init?.type === 'CallExpression' && declarator.init.callee.type === 'Identifier' && declarator.init.callee.name === TRAIT_FN_NAME) {
-            const call_expr = declarator.init as TraitCallExpression;
-            const args = call_expr.arguments;
-            const definition_errors: TraitError[] = [];
-
-            if (args.length !== 1) {
-                // console.log('error: invalid trait argument length');
-                definition_errors.push(TraitError.InvalidTraitCallArguments());
-                return true;
-                // errors[varName] = definition_errors;
-                // traits[varName] = new TraitDefinition(call_expr as TraitCallExpression, varName, path, start, end, false, Flags.empty);
-                // continue;
-            }
-
-            // const base = parseType(call_expr.typeArguments.params as TypeArguments['params'], file.code, types);
-            // if (Array.isArray(base)) {
-            // errored = true;
-            // definition_errors.push(...base);
-            // traits[varName] = new TraitDefinition(call_expr, varName, path, start, end, false, Flags.empty)
-            // continue;
-            // }
-
-            // traits[varName] = new TraitDefinition(
-            //     call_expr,
-            //     varName,
-            //     path,
-            //     start,
-            //     end,
-            //     true,
-            //     base,
-            // );
-        }
-    },
-
-    parseImpl() { }
-} as const;
-
 export function parseTraits(file: TraitFile<FileRegistry>) {
     const traits: Record<string, TraitDefinition> = {},
         errors: Record<string, TraitError[]> = {};
@@ -187,12 +115,11 @@ export function parseTraits(file: TraitFile<FileRegistry>) {
 
     for (const varName in vars) {
         const { node: declaration, start, end } = vars[varName]!;
-        if (declaration.type !== 'VariableDeclaration') {
+        if (
+            declaration.type !== 'VariableDeclaration' ||
+            declaration.kind !== 'const'
+        ) {
             continue;
-        }
-        if (declaration.kind !== 'const') {
-            errors[varName] = [TraitError.LetDeclaration()];
-            continue
         }
 
         const declarator = declaration.declarations[0];
@@ -237,6 +164,53 @@ export function parseTraits(file: TraitFile<FileRegistry>) {
     }
 }
 
+export function parseImpls(file: TraitFile<FileRegistry>) {
+    const traits: Record<string, TraitDefinition> = {},
+        errors: Record<string, TraitError[]> = {};
+    const { path, registry: { types, vars } } = file;
+    let errored = false;
+
+    for (const varName in vars) {
+        const { node: declaration, start, end } = vars[varName]!;
+
+        if (declaration.type === 'ClassDeclaration') {
+            // check if this class has an impl call in the static block
+
+            const elements = declaration.body.body;
+            for (const element of elements) {
+                if (element.type === 'StaticBlock') {
+                    for (const statement of element.body) {
+                        // TODO: remove hard code here
+                        if (
+                            statement.type === 'ExpressionStatement'
+                            && statement.expression.type === 'CallExpression'
+                            && statement.expression.callee.type === 'Identifier'
+                            && statement.expression.callee.name === 'impl'
+                        ) {
+                            const call_expr = statement.expression;
+                            const args = call_expr.arguments;
+                            const type_args = call_expr.typeArguments;
+
+                            if (!type_args || type_args.params.length !== 2) {
+                                // error: impl TypeArgs should have trait and class
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+
+    return {
+        traits,
+        errors,
+        errored
+    }
+
+}
+
 export function parseDerives(project: Project, file: TraitFile<FileRegistry>) {
     const errors: Record<string, TraitError[]> = {};
     for (const def of file.traits()) {
@@ -270,7 +244,7 @@ export function parseDerives(project: Project, file: TraitFile<FileRegistry>) {
     }
 }
 
-export function parseDefinitionImplementation(file: TraitFile<FileRegistry>, definition: TraitDefinition) {
+export function parseDefinition(file: TraitFile<FileRegistry>, definition: TraitDefinition) {
     if (!definition.valid) {
         return;
     }
@@ -306,7 +280,7 @@ export function parseDefinitionImplementation(file: TraitFile<FileRegistry>, def
         return;
     }
 
-    const dependencies = parseMethodDependencies(file, definition, deps.staticProps, deps.instanceProps);
+    const dependencies = getRefsInMethod(file, definition, deps.staticProps, deps.instanceProps);
     if (Array.isArray(dependencies)) {
         for (const message of dependencies) {
             console.log(message);
@@ -314,6 +288,7 @@ export function parseDefinitionImplementation(file: TraitFile<FileRegistry>, def
         }
         return;
     }
+
     definition.initialize(dependencies);
 }
 
@@ -451,15 +426,25 @@ function getDerives(
     return { valid: true, derives: queuedDerives } as const;
 }
 
-function parseMethodDependencies(file: TraitFile<FileRegistry>, definition: TraitDefinition, staticProps: Record<string, ObjectProperty>, instanceProps: Record<string, TraitObjectProperty>) {
-    const staticDependencies: Record<string, MethodParseResult> = {};
-    const instanceDependencies: Record<string, MethodParseResult> = {};
 
-    const errors: any[] = [];
-    // let erroredOn: string | undefined;
-    for (const propertyName in staticProps) {
-        const prop = staticProps[propertyName]!;
-        const method = prop.value as Function;
+const ambiguousFixMessage = `Fix: convert to\n    \`as<Trait>(this).propertyName\`
+or  \`(this as Trait).propertyName\`
+to resolve ambiguities`;
+
+function checkMethods(
+    file: TraitFile<FileRegistry>,
+    definition: TraitDefinition,
+    properties: Record<string, ObjectProperty>,
+    errors: string[]
+) {
+    const propsWithRefs: Record<string, CheckMethodResult> = {}
+    for (const propertyName in properties) {
+        const method = properties[propertyName]!.value;
+
+        if (method.type !== 'FunctionExpression') {
+            continue;
+        }
+
         if (!method.body) {
             //! error: default methods must have a body
             errors.push(`expected default method \`${propertyName}\` to have an implementation`)
@@ -473,6 +458,8 @@ function parseMethodDependencies(file: TraitFile<FileRegistry>, definition: Trai
         if (references.ambiguousCallSites.length) {
             definition.invalidate();
             const ambiguousCallSites = references.ambiguousCallSites;
+
+
             const names = Array.from(new Set(ambiguousCallSites.map(acs => acs.identName)));
             const messages = names.map(name => {
                 const names = [];
@@ -487,94 +474,34 @@ function parseMethodDependencies(file: TraitFile<FileRegistry>, definition: Trai
                         names.push(derive.name);
                     }
                 }
-                return `    ${name}, defined in [ ${names.join(', ')}] `
+                return `    ${name}    (defined in ${names.join(', ')} ) `
             });
 
-            const fixMessage = `Fix: convert to\n    \`as<Trait>(this).propertyName\`
-or  \`(this as Trait).propertyName\`
-to resolve ambiguities`;
-
             let message = `[ ${definition.name}.${propertyName} ] has ${ambiguousCallSites.length} ambiguous property access${ambiguousCallSites.length > 1 ? `(es)` : ''}:
-    ${messages}\n${fixMessage}`;
-
-
+            ${messages}\n${ambiguousFixMessage}`;
             errors.push(message);
         } else {
+
             if (references.exportRefs.length || Object.keys(references.importRefs).length) {
                 console.log('REFERENCES: ', definition.name, Object.fromEntries(Object.entries(references.importRefs).map(([k, v]) => [k, createFilteredExportOrImportNames(v)])), createFilteredExportOrImportNames(references.exportRefs));
             }
 
-            // const importStatements = Object.entries(references.importRefs).map((entry) => {
-            //     const [moduleRequest, references] = entry;
-            //     return createImportDeclaration(moduleRequest, createFilteredExportOrImportNames(references));
-            // });
-            staticDependencies[propertyName] = references;
+            propsWithRefs[propertyName] = references;
         }
-
-
-
-        // const importStatements = Object.entries(references.importRefs).map((entry) => {
-        //     const [moduleRequest, references] = entry;
-        //     return createImportDeclaration(moduleRequest, createFilteredExportOrImportNames(references));
-        // });
-
-        // if (Object.keys(references.importRefs).length) {
-        //     console.log(importStatements);
-        // }
-
-        // if (references.exportRefs.length) {
-        //     console.log([createImportDeclaration(file.path, createFilteredExportOrImportNames(references.exportRefs))]);
-        // }
 
     }
 
-    for (const propertyName in instanceProps) {
-        const prop = instanceProps[propertyName]!;
-        const method = prop.value as Function;
-        if (!method.body) {
-            //! error: default methods must have a body
-            errors.push(`expected default instance method \`${propertyName}\` to have an implementation`)
+    return propsWithRefs;
+}
 
-            // erroredOn = propertyName;
-            break;
-        }
+function getRefsInMethod(file: TraitFile<FileRegistry>, definition: TraitDefinition, staticProps: Record<string, ObjectProperty>, instanceProps: Record<string, TraitObjectProperty>) {
 
-        const scope = file.scope(method as any);
-        // ! exclude globals such as console, require
+    const errors: string[] = [];
 
-        const references = checkMethod(file.registry, definition, scope!, method);
+    const staticRefs = checkMethods(file, definition, staticProps, errors);
+    const instanceRefs = checkMethods(file, definition, instanceProps, errors);
 
-        if (references.ambiguousCallSites.length) {
-            definition.invalidate();
-            const ambiguousCallSites = references.ambiguousCallSites;
-            const names = Array.from(new Set(ambiguousCallSites.map(acs => acs.identName)))
-            console.error(`[${definition.name}.${propertyName}] has ${ambiguousCallSites.length} ambiguous property access(es):\n${names.map(name => {
-                const names = [];
-                if (definition.flags.baseNameSet.has(name)) {
-                    names.push(definition.name);
-                }
-
-                const derives = definition.flags.derives;
-                for (const deriveName in derives) {
-                    const derive = derives[deriveName]!;
-                    if (derive.flags.baseNameSet.has(name)) {
-                        names.push(derive.name);
-                    }
-                }
-                return `    ${name}, defined in [ ${names.join(', ')}] `
-            })}`);
-
-            console.log(`use \`as<Trait>(this).propertyName\`\nor \`(this as Trait).propertyName\`\nto resolve ambiguities`);
-        } else {
-            if (references.exportRefs.length || Object.keys(references.importRefs).length) {
-                console.log('REFERENCES: ', definition.name, Object.fromEntries(Object.entries(references.importRefs).map(([k, v]) => [k, createFilteredExportOrImportNames(v)])), createFilteredExportOrImportNames(references.exportRefs));
-            }
-
-            instanceDependencies[propertyName] = references;
-        }
-    }
-
-    return errors.length ? errors : { static: staticDependencies, instance: instanceDependencies }
+    return errors.length ? errors : { static: staticRefs, instance: instanceRefs }
 }
 
 function checkMethod(
@@ -585,12 +512,13 @@ function checkMethod(
 ): CheckMethodResult {
     const ambiguousCallSites: { start: number; end: number; identName: string }[] = [];
     // ! exclude globals such as console, require
-    const bodyReferences = scope?.through.filter(t => {
-        return registry.has(t.identifier.name);
-    }).map(r => registry.get(r.identifier.name)!);
+    const bodyReferences = scope?.through.filter(
+        r => registry.has(r.identifier.name)).map(
+            r => registry.get(r.identifier.name)!);
 
     const paramReferences: Reference[] = [];
     const returnReferences: Reference[] = [];
+
 
     for (const param of method.params) {
         walk(param, {
@@ -609,6 +537,35 @@ function checkMethod(
     }
 
     //! SAFETY: method body has been checked to be non-null
+
+    checkAmbiguities(definition, method, ambiguousCallSites);
+
+
+    const references = paramReferences.concat(bodyReferences ?? []).concat(returnReferences);
+    const importRefs: Record<string, Reference[]> = {};
+    const exportRefs = [];
+
+    for (let i = 0; i < references.length; i++) {
+        const reference = references[i]!;
+        if (!reference.isLocal) {
+            if (!importRefs[reference.moduleRequest]) {
+                importRefs[reference.moduleRequest] = [];
+            };
+
+            importRefs[reference.moduleRequest]!.push(reference)
+        } else {
+            exportRefs.push(reference);
+        }
+    }
+
+    return {
+        importRefs,
+        exportRefs,
+        ambiguousCallSites
+    };
+}
+
+function checkAmbiguities(definition: TraitDefinition, method: Function, ambiguousCallSites: AmbiguousCallSite[]) {
     walk(method.body!, {
         enter(node, parent) {
             //* skip looking for `this` references in scopes that are not `trait.methodName` 
@@ -635,69 +592,8 @@ function checkMethod(
                         ambiguousCallSites.push({ start: parent.start, end: parent.end, identName: identName });
                     }
                 }
-                // console.log('ident', getCode(code, parent.start, parent.end), f);
             }
         },
     });
 
-    const references = paramReferences.concat(bodyReferences ?? []).concat(returnReferences);
-    const importRefs: Record<string, Reference[]> = {};
-    const exportRefs = [];
-
-    for (let i = 0; i < references.length; i++) {
-        const reference = references[i]!;
-        if (!reference.isLocal) {
-            if (!importRefs[reference.moduleRequest]) {
-                importRefs[reference.moduleRequest] = [];
-            };
-
-            importRefs[reference.moduleRequest]!.push(reference)
-        } else {
-            exportRefs.push(reference);
-        }
-    }
-
-    return {
-        importRefs,
-        exportRefs,
-        ambiguousCallSites
-    };
 }
-
-// function parseImplementationImplementation({ tracker, registry }: TraitFile<FileRegistry>, definition: TraitDefinition) {
-//     const flags = definition.flags,
-//         properties = definition.properties,
-//         err_missingStaticNames: string[] = [],
-//         err_missingInstanceNames: string[] = [],
-//         props = parseTraitProperties(
-//             properties,
-//             (name, isStatic) => {
-//                 const valid = flags.has(name, REQUIRED, isStatic);
-//                 if (!valid) {
-//                     if (flags.nameSet.has(name)) {
-//                         if (isStatic) {
-//                             err_missingStaticNames.push(name)
-//                         } else {
-//                             err_missingInstanceNames.push(name);
-//                         }
-//                     }
-
-//                 }
-//                 return valid;
-//             }
-//         );
-
-//     if (
-//         !props.valid
-//         || err_missingInstanceNames.length
-//         || err_missingStaticNames.length
-//     ) {
-//         return;
-//     }
-
-//     const dependencies = parseMethodDependencies(tracker, registry, definition, props.staticProps, props.instanceProps);
-//     if (dependencies && definition.valid) {
-//         definition.initialize(dependencies)
-//     }
-// }
-

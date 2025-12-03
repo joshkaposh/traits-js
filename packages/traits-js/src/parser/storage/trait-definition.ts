@@ -1,31 +1,36 @@
-import type { Declaration, Span, TSTupleElement } from "oxc-parser";
+import type { Class, Declaration, TSTupleElement } from "oxc-parser";
 import { Flags } from "./flags";
-import type { DeriveTupleType, TraitCallExpression, TraitDeclaration, TraitObjectExpression } from "../node";
-import type { MethodParseResult } from "../parser";
+import type { DeriveTupleType, TraitCallExpression, TraitDeclaration } from "../node";
+import type { CheckMethodResult } from "../parser";
 
-export type UnknownStatic = Span[]
-export type UnknownInstance = Array<{
-    type: 'SpreadAssigment' | 'KeyNeIdentifier' | 'DefinesRequired';
-    start: number;
-    end: number
-}>;
-
-export type TraitDefinitionMeta = {
-    base: Flags;
-    derives: TSTupleElement[];
-    implementationObject: TraitObjectExpression | null;
+/** metadata for properly linking import statements at comp time */
+type References = {
+    static: Record<string, CheckMethodResult>;
+    instance: Record<string, CheckMethodResult>
 };
+
+// TODO: 1: assume we can only impl inside static blocks
+// TODO: 2: expand to allow impls for classes in other files, projects, etc.
+type TraitImpl = {
+    targetClass: Class;
+    targetTrait: TraitDefinition;
+    /**
+     * true if and only if `definition` is local to this project
+     */
+    ownedTrait: boolean;
+    /**
+     * true if and only `impl` was called in a static block
+     */
+    ownedClass: boolean;
+}
 
 export class TraitDefinition<Valid extends boolean = boolean> {
     #joined: Flags<Valid>;
-    #base: Flags<Valid>;
+    // #base: Flags<Valid>;
     #node: TraitDeclaration;
     #call_expr: TraitCallExpression;
     #uninitDerives: TSTupleElement[];
-    #dependencies: {
-        static: Record<string, MethodParseResult>;
-        instance: Record<string, MethodParseResult>
-    };
+    #references: References;
 
     #name: string;
     #path: string;
@@ -39,7 +44,6 @@ export class TraitDefinition<Valid extends boolean = boolean> {
 
     private constructor(
         node: TraitDeclaration,
-        // call_expr: TraitCallExpression,
         name: string,
         path: string,
         start: number,
@@ -50,7 +54,7 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         const call_expr = node.declarations[0].init;
         this.#node = node;
         this.#call_expr = call_expr;
-        this.#base = base;
+        // this.#base = base;
         this.#joined = base.clone();
         this.#name = name;
         this.#path = path;
@@ -61,7 +65,7 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         this.#initialized = false;
         const params = call_expr.typeArguments.params;
         this.#uninitDerives = params.length === 2 ? params[1].elementTypes : [] as DeriveTupleType['elementTypes'];
-        this.#dependencies = {
+        this.#references = {
             static: {},
             instance: {}
         };
@@ -114,21 +118,18 @@ export class TraitDefinition<Valid extends boolean = boolean> {
             path: this.#path,
             valid: this.#valid,
             flags: this.flags.serialize(),
-            dependencies: this.#dependencies
+            references: this.#references
         }
     }
 
-    initialize(dependencies: {
-        static: Record<string, MethodParseResult>;
-        instance: Record<string, MethodParseResult>
-    }) {
+    initialize(references: References) {
         this.#assertValid('initialize');
 
         if (this.#initialized) {
             throw new Error('Cannot re-initialize definitions');
         }
-        this.#dependencies = dependencies;
 
+        this.#references = references;
     }
 
 
@@ -142,7 +143,7 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         return this.#joined.names.filter((_, i) => Boolean(this.#joined.flags[i]! & type));
     }
 
-    // getAmbiguities(result: MethodParseResult) {
+    // getAmbiguities(result: CheckMethodResult) {
     //     const self = this;
     //     const flags = self.flags;
     //     const ambiguousCallSites = result.ambiguousCallSites;

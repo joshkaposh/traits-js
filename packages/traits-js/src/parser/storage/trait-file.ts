@@ -1,8 +1,8 @@
 import type { ParseFileResultResult } from "../types";
 import { TraitDefinition } from ".";
-import { Registry, type DeclarationRegistry, type FileRegistry, type IndexRegistry, type Reference } from "./registry";
+import { Registry, type FileRegistry, type IndexRegistry, type Reference } from "./registry";
 import * as eslintScope from 'eslint-scope';
-import { visitorKeys, type Node, type Span, type TSInterfaceDeclaration, type TSTypeAliasDeclaration } from "oxc-parser";
+import { visitorKeys, type Node } from "oxc-parser";
 import { walk } from "oxc-walker";
 
 export class TraitFile<R extends Registry = Registry> {
@@ -67,7 +67,7 @@ export class TraitFile<R extends Registry = Registry> {
         return !this.#isIndex;
     }
 
-    init() {
+    initialize() {
         walk(this.ast, {
             enter(node) {
                 // TODO: wtf? why doesn't parseSync add range??

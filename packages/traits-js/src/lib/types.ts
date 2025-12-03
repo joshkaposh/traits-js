@@ -35,12 +35,10 @@ export type IntoTrait<T> = T extends Trait ? T : T extends TraitRecord ? Trait<T
 type Class<S, I> = (new () => I) & S;
 
 export type Type<Target extends ValidClass, TargetTrait> =
-    IntoTrait<TargetTrait> extends infer T extends ValidClass ?
     Target & Class<
-        Target & Prettify<Omit<T, Modifier | instance>>,
-        InstanceType<Target> & GetInstance<T>
-    > :
-    never;
+        Target & Prettify<Omit<TargetTrait, Modifier | instance>>,
+        InstanceType<Target> & GetInstance<TargetTrait>
+    >;
 
 export type Self<T> = This<OmitModifiers<T>>;
 
