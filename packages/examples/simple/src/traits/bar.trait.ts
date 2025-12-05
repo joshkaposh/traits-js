@@ -1,11 +1,11 @@
-import { instance, trait, type Trait, type Derive, type Definition, type IntoTrait } from "traits-js";
+import { instance, trait, type Trait, type Definition, type IntoTrait } from "traits-js";
 import { Foo as FooType } from "./foo.trait";
 
 export type Obj = { name: string };
 
 export type BarType = {
     requiredStaticBar(): void;
-    defaultStaticBar?(...obj: Trait[]): void;
+    defaultStaticBar?(...obj: any[]): void;
     [instance]: {
         reqInstanceBar(): void;
     }
@@ -25,7 +25,7 @@ export const switchObject = {};
 
 
 export const Bar = trait<BarType>({
-    defaultStaticBar(obj: Trait<any>, obj2: ReturnType<typeof trait<FooBarBaz>>, obj3: IntoTrait<Derive<BarType, []>>) {
+    defaultStaticBar(obj: Trait, obj2: ReturnType<typeof trait<FooBarBaz>>, obj3: IntoTrait<BarType>) {
         const v = {};
         console.log(v);
 

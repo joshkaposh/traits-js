@@ -1,9 +1,11 @@
-import type { ParseFileResultResult } from "../types";
+import type { ParseFileResultResult } from "../resolve";
 import { TraitDefinition } from ".";
-import { Registry, type FileRegistry, type IndexRegistry, type Reference } from "./registry";
+import { Registry, type FileRegistry, type ForeignImpl, type ImplStatementMeta, type IndexRegistry, type OwnedImpl, type Reference } from "./registry";
 import * as eslintScope from 'eslint-scope';
 import { visitorKeys, type Node } from "oxc-parser";
 import { walk } from "oxc-walker";
+import type { ImplStatement } from "../node";
+import type { Project } from "../project";
 
 export class TraitFile<R extends Registry = Registry> {
 
@@ -53,10 +55,6 @@ export class TraitFile<R extends Registry = Registry> {
         return this.#registry;
     }
 
-    get totalCount() {
-        return this.#size;
-    }
-
 
     isIndex(): this is TraitFile<IndexRegistry> {
         return this.#isIndex;
@@ -79,17 +77,15 @@ export class TraitFile<R extends Registry = Registry> {
             childVisitorKeys: visitorKeys,
             ecmaVersion: 2022,
             sourceType: 'module',
+            impliedStrict: true,
         });
 
         this.#registry.store(this.ast, this.path);
     }
 
-    setTraits(
-        traits: Record<string, TraitDefinition>
-    ) {
-        // @ts-expect-error
+
+    setTraits(traits: Record<string, TraitDefinition>) {
         this.#registry.traits = traits;
-        this.#size = Object.keys(traits).length
     }
 
     get(bindingName: string) {
@@ -112,23 +108,36 @@ export class TraitFile<R extends Registry = Registry> {
         return this.#registry.traits[name];
     }
 
-    ids(): IteratorObject<string> {
-        return this.traits().map(d => d.id);
-    }
-
-    *names(): Generator<string> {
-        for (const key in this.#registry.traits) {
-            yield key;
+    *traits(): Generator<TraitDefinition> {
+        for (const name in this.#registry.traits) {
+            yield this.#registry.traits[name]!;
         }
     }
 
-    *traits(): Generator<TraitDefinition> {
-        for (const key in this.#registry.traits) {
-            yield this.#registry.traits[key]!;
+    *impls(): Generator<ImplStatementMeta> {
+        for (const impl of this.#registry.ownedImpls) {
+            yield impl;
+        }
+
+        for (const impl of this.#registry.impls) {
+            yield impl;
+        }
+    }
+
+    *foreignImpls(): Generator<ForeignImpl> {
+        for (const impl of this.#registry.impls) {
+            yield impl;
+        }
+    }
+
+    *ownedImpls(): Generator<OwnedImpl> {
+        for (const impl of this.#registry.ownedImpls) {
+            yield impl;
         }
     }
 
     scope(node: Node) {
         return this.#tracker.acquire(node as any)
     }
+
 }

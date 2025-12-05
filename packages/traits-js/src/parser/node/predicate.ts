@@ -1,5 +1,5 @@
 import type { Declaration, Node } from "oxc-parser";
-import type { ConstVariableDeclaration } from "./types";
+import type { ConstVariableDeclaration, ImplDeclaration, ImplStatement } from "./types";
 
 export function constDeclaration(node: Node): node is ConstVariableDeclaration {
     return node.type === 'VariableDeclaration'
@@ -10,26 +10,30 @@ export function constVariableDeclaration(node: Node): node is ConstVariableDecla
     return constDeclaration(node) && node.declarations[0]?.id.type === 'Identifier'
 }
 
+export function implCallExpression(node: Node) {
+    return node.type === 'CallExpression'
+        && node.callee.type === 'Identifier'
+        && node.callee.name === 'impl'
+
+}
+
+export function implStatement(node: Node): node is ImplStatement {
+    return node.type === 'ExpressionStatement' && implCallExpression(node.expression)
+}
+
+export function implDeclaration(node: Node): node is ImplDeclaration {
+    return constVariableDeclaration(node) && implCallExpression(node.declarations[0].init)
+}
+
 export function declaredInModule(parent: Node | null | undefined, node: Node): node is Declaration {
     return (
         parent?.type === 'Program'
         || parent?.type === 'ExportNamedDeclaration'
         || parent?.type === 'ExportDefaultDeclaration'
-    ) && declaration(parent, node);
+    ) && declaration(node);
 }
 
-export function declaration(parent: Node | null | undefined, node: Node): node is Declaration {
-    if (!parent) {
-        return false;
-    }
-
-    if (!(parent.type === 'Program'
-        || parent.type === 'ExportNamedDeclaration'
-        || parent.type === 'ExportDefaultDeclaration')
-    ) {
-        return false;
-    }
-
+export function declaration(node: Node): node is Declaration {
     const t = node.type;
     return (
         t === 'VariableDeclaration'

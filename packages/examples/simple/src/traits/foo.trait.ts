@@ -1,4 +1,4 @@
-import { instance, trait, impl } from 'traits-js';
+import { instance, trait, impl, type Trait } from 'traits-js';
 import { Clone } from 'traits-js/traits';
 
 export const Foo = trait<{
@@ -31,6 +31,8 @@ export const Simple = trait<{
 }>({});
 
 export const UsesOtherPackage = trait<{}, [Clone<typeof SomeClass>]>({});
+// TODO: enable this syntax in cases where we need to pass generics to trait
+// export const UsesOtherPackage = trait<{}, [Trait<Clone<typeof SomeClass>>]>({});
 
 impl<typeof UsesOtherPackage>(() => ({
     [instance]: {
@@ -77,6 +79,19 @@ export class SomeClass {
 
     }
 }
+
+impl<typeof Simple, typeof SomeOtherClass>(() => ({
+    method() { },
+    [instance]: {
+        method(param) {
+        },
+    }
+
+}))
+
+export class SomeOtherClass { }
+
+
 
 //* This method of implementing traits ensures
 //* no private property accesses can occur

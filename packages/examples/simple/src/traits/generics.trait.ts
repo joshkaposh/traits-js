@@ -1,4 +1,4 @@
-import { trait, as } from "traits-js";
+import { trait, as, impl } from "traits-js";
 import { Foo as FooType } from "./foo.trait";
 
 export const A = trait<{ a(): void }>({});
@@ -6,6 +6,21 @@ export const B = trait<{ b(): void }>({});
 export const C = trait<{ c(): void }>({});
 
 export const D = trait<{ d(): void }, [typeof A, typeof B, typeof C]>({});
+
+export const DuplicateMethodA = trait<{ duplicate(param: string): void }>({});
+export const DuplicateMethodB = trait<{ duplicate(param: number): void }>({});
+export const DuplicateMethods = trait<{}, [typeof DuplicateMethodA, typeof DuplicateMethodB]>({});
+
+
+export class DuplicateMethodClass { }
+
+impl<typeof DuplicateMethodA, typeof DuplicateMethodClass>(() => ({
+    duplicate(param) {
+
+    },
+}))
+
+
 
 export const Bar1 = trait<{
     bar?<T extends string>(str: T): T;
@@ -28,6 +43,6 @@ export const Bar2 = trait<{
         this.bar(0);
         this.bar('');
 
-        as<typeof Bar2>().bar(0);
+        as<typeof D>().d();
     },
 });

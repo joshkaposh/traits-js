@@ -1,4 +1,4 @@
-import type { Node, TSSignature } from "oxc-parser";
+import type { Class, Node, TSSignature } from "oxc-parser";
 import type { TraitDefinition } from "./trait-definition";
 import { TraitError } from "../errors";
 import type { DeclarationRegistry } from "./registry";
@@ -217,7 +217,11 @@ export class Flags<Valid extends boolean = boolean> {
 
     static readonly empty = new Flags([], [], {});
 
-    static tryFrom(types: DeclarationRegistry<TraitAliasDeclaration>, code: string, typeArgument: Node): Flags<true> | TraitError[] {
+    static tryFromType(
+        types: DeclarationRegistry<TraitAliasDeclaration>,
+        code: string,
+        typeArgument: Node,
+    ): Flags<true> | TraitError[] {
         if (typeArgument.type === 'TSTypeLiteral') {
             const flags = Flags.fromSignatures(typeDeclarationSignatures(typeArgument)!);
             return flags instanceof Flags ? flags : flags.errors;
@@ -373,7 +377,7 @@ export class Flags<Valid extends boolean = boolean> {
 
     get(flags: number) {
         if (this.#cache.has(flags)) {
-            return this.#cache.get(flags)
+            return this.#cache.get(flags)!;
         } else {
             const _flags = this.#flags;
             const names = this.#names;

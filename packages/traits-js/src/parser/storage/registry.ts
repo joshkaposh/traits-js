@@ -1,5 +1,5 @@
-import type { Declaration, ImportNameKind, Program, StaticExportEntry } from "oxc-parser";
-import { is, type TraitAliasDeclaration, type TypeDeclaration } from "../node";
+import type { Argument, ArrowFunctionExpression, Function, Class, Declaration, ImportNameKind, Node, Program, StaticExportEntry, TSTypeParameterInstantiation } from "oxc-parser";
+import { is, typeName, type TraitAliasDeclaration, type TypeDeclaration, type VarDeclaration } from "../node";
 import type { TraitDefinition } from "./trait-definition";
 import { walk } from "oxc-walker";
 
@@ -37,6 +37,21 @@ export type Reference = {
         }
     ));
 
+export type OwnedImpl = {
+    readonly type: 'owned';
+    className: string;
+    traitName: string;
+    impl: ArrowFunctionExpression | Function
+};
+
+export type ForeignImpl = {
+    readonly type: 'foreign';
+    className: string;
+    traitName: string;
+    impl: ArrowFunctionExpression | Function
+}
+export type ImplStatementMeta = OwnedImpl | ForeignImpl;
+
 export type ImportRegistry = Record<string, Import>;
 export type ReExportRegistry = Record<string, ReExport>;
 export type LocalExportRegistry = Record<string, StaticExportEntry>;
@@ -45,196 +60,142 @@ export type DeclarationRegistry<T extends Declaration = Declaration> = Record<st
     start:
     number;
     end: number;
-    // references: any[];
 }>;
 
-export type FileRegistry = ReturnType<typeof Registry['File']>;
-export type IndexRegistry = ReturnType<typeof Registry['Index']>;
-export type Registry = { [K in keyof typeof Registry]: ReturnType<typeof Registry[K]> }[keyof typeof Registry];
+export type Registry = FileRegistry | IndexRegistry;
 
+interface RegistryBase {
+    traits: Record<string, TraitDefinition>;
+    impls: ForeignImpl[];
+    ownedImpls: OwnedImpl[];
 
-class FileRegistry2 {
-    readonly type = 'file';
-    importTypes = {} as ImportRegistry;
-    importVars = {} as ImportRegistry;
-    exportTypes = {} as LocalExportRegistry;
-    exportVars = {} as LocalExportRegistry;
-    types = {} as DeclarationRegistry<TypeDeclaration>;
-    vars = {} as DeclarationRegistry;
-    traits = {} as Record<string, TraitDefinition>;
-    store(ast: Program, path: string) {
+    store(ast: Program, path: string): void;
 
-        const exportVars = this.exportVars, exportTypes = this.exportTypes;
-        const types: DeclarationRegistry<TypeDeclaration> = {}, vars: DeclarationRegistry = {};
+    has(name: string): boolean;
+    hasType(name: string): boolean;
 
-        walk(ast, {
-            enter(node, parent) {
-                if (parent && is.declaredInModule(parent, node)) {
-                    if (
-                        is.constVariableDeclaration(node)
-                        && node.declarations[0].id.name in exportVars
-                    ) {
-                        vars[node.declarations[0].id.name] = {
-                            node,
-                            start: parent.start,
-                            end: parent.end,
-                        };
+    get(name: string): Reference | undefined | void;
+    getType(name: string): Reference | undefined | void;
 
-                    } else if (
-                        (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration')
-                        && node.id
-                    ) {
-                        const name = node.id.name;
-                        vars[name] = {
-                            node,
-                            start: parent.start,
-                            end: parent.end,
-                        };
-
-                    } else if (
-                        node.type === 'TSTypeAliasDeclaration'
-                        && node.typeAnnotation.type === 'TSTypeLiteral'
-                    ) {
-                        const typeDeclarationName = node.id.name;
-                        if (!(typeDeclarationName in exportTypes)) {
-                            console.error('trait files must export all type declarations');
-                            console.log(`${path}`);
-                            console.error(`declared a private type ${typeDeclarationName}\n`);
-                            return;
-                        }
-
-                        types[node.id.name] = {
-                            node: node as TraitAliasDeclaration,
-                            start: node.start,
-                            end: node.end,
-                        };
-                    }
-                }
-            },
-
-        });
-
-        this.types = types;
-        this.vars = vars;
-    }
-    has(name: string) {
-        return name in this.importTypes
-            || name in this.importVars
-            || name in this.exportTypes
-            || name in this.exportVars
-    }
-    hasType(name: string) {
-        return name in this.importTypes
-            || name in this.exportTypes
-    }
-    get(name: string): Reference | undefined {
-        let importRef = this.importTypes[name];
-        if (importRef) {
-            return {
-                name: name,
-                isType: true,
-                isLocal: false,
-                isTrait: false,
-                moduleRequest: importRef.moduleRequest,
-            }
-        }
-
-        importRef = this.importVars[name];
-        if (importRef) {
-            return {
-                name: name,
-                isType: false,
-                isLocal: false,
-                isTrait: false,
-                moduleRequest: importRef.moduleRequest,
-            }
-        }
-
-        if (name in this.traits) {
-            return {
-                name: name,
-                isType: false,
-                isLocal: true,
-                isTrait: true,
-                definition: this.traits[name]!
-            }
-        }
-
-        if (name in this.exportTypes) {
-            return {
-                name: name,
-                isType: true,
-                isLocal: true,
-                isTrait: false,
-
-            }
-        } else if (name in this.exportVars) {
-            return {
-                name: name,
-                isType: false,
-                isLocal: true,
-                isTrait: false,
-
-            }
-        }
-
-    }
-    getType(name: string): Reference | undefined {
-        const importRef = this.importTypes[name];
-        if (importRef) {
-            return {
-                name: name,
-                isType: true,
-                isLocal: false,
-                isTrait: false,
-                moduleRequest: importRef.moduleRequest,
-            }
-        }
-
-        if (name in this.exportTypes) {
-            return {
-                name: name,
-                isType: true,
-                isLocal: true,
-                isTrait: false,
-            }
-        }
-    }
 }
+
+export interface IndexRegistry extends RegistryBase {
+    readonly type: 'index';
+    importTypes?: never;
+    importVars?: never;
+    exportTypes?: never;
+    exportVars?: never;
+
+    types: ReExportRegistry;
+    vars: ReExportRegistry;
+}
+
+export interface FileRegistry extends RegistryBase {
+    readonly type: 'file';
+    importTypes: ImportRegistry;
+    importVars: ImportRegistry;
+    exportTypes: LocalExportRegistry;
+    exportVars: LocalExportRegistry;
+    types: DeclarationRegistry<TypeDeclaration>;
+    vars: DeclarationRegistry<VarDeclaration>;
+
+    classes: DeclarationRegistry<Class>;
+}
+
+// function getPropertyIdent(expr: MemberExpression) {
+//     let node: Node = expr;
+//     while (node.type === 'MemberExpression') {
+//         if (node.property.type === 'MemberExpression') {
+//             node = node.property;
+//         }
+//     }
+// }
+
+/**
+ * Data needed for `impl`s -
+ * 
+ * class and it's properties
+ */
 
 export const Registry = {
     Index() {
+        // const refCache: Record<string, Reference> = {};
         return {
             type: 'index',
-            types: {} as ReExportRegistry,
-            vars: {} as ReExportRegistry,
-            traits: {} as Record<string, TraitDefinition>,
+            types: {},
+            vars: {},
+            traits: {},
+            impls: [],
+            ownedImpls: [],
 
-            store(ast: Program, path: string) {
-
-            },
+            store(_ast: Program, _path: string) { },
             has(name: string) {
                 return name in this.types || name in this.vars;
             },
             hasType(name: string) {
                 return name in this.types;
             },
-        } as const;
+            get(_name) {
+                // let importRef = this.types[name];
+                // if (importRef) {
+                //     refCache[name] ??= {
+                //         name: name,
+                //         isType: true,
+                //         isLocal: false,
+                //         isTrait: false,
+                //         moduleRequest: importRef.moduleRequest,
+                //     }
+
+                //     return refCache[name];
+                // }
+
+                // importRef = this.vars[name];
+                // if (importRef) {
+                //     refCache[name] ??= {
+                //         name: name,
+                //         isType: false,
+                //         isLocal: false,
+                //         isTrait: false,
+                //         moduleRequest: importRef.moduleRequest,
+                //     }
+
+                //     return refCache[name];
+                // }
+            },
+
+            getType(_name) { },
+        } satisfies IndexRegistry;
     },
     File() {
+
+        const refCache: Record<string, Reference> = {};
         return {
             type: 'file',
-            importTypes: {} as ImportRegistry,
-            importVars: {} as ImportRegistry,
-            exportTypes: {} as LocalExportRegistry,
-            exportVars: {} as LocalExportRegistry,
-            types: {} as DeclarationRegistry<TraitAliasDeclaration>,
-            vars: {} as DeclarationRegistry,
-            traits: {} as Record<string, TraitDefinition>,
+            importTypes: {},
+            importVars: {},
+            exportTypes: {},
+            exportVars: {},
+
+            types: {},
+            vars: {},
+            classes: {},
+
+            traits: {},
+            impls: [],
+            ownedImpls: [],
+
             store(ast: Program, path: string) {
 
-                const exportVars = this.exportVars, exportTypes = this.exportTypes;
-                const types: DeclarationRegistry<TypeDeclaration> = {}, vars: DeclarationRegistry = {};
+                const exportVars = this.exportVars,
+                    exportTypes = this.exportTypes;
+
+                const types: DeclarationRegistry<TypeDeclaration> = {},
+                    vars: DeclarationRegistry<VarDeclaration> = {},
+                    classes: DeclarationRegistry<Class> = {},
+                    impls: ForeignImpl[] = [],
+                    ownedImpls: OwnedImpl[] = [];
+
+                // console.log('STORING ', path);
 
                 walk(ast, {
                     enter(node, parent) {
@@ -279,14 +240,20 @@ export const Registry = {
                                 };
                             }
                         }
-                    },
 
+                        addImpls(impls, ownedImpls, parent, node);
+
+                    },
                 });
 
-                // @ts-expect-error
+                // console.log('REGISTRY:: STORE', path, ownedImpls.length);
+
+
                 this.types = types;
-                // @ts-expect-error
                 this.vars = vars;
+                this.impls = impls;
+                this.ownedImpls = ownedImpls;
+                this.classes = classes;
             },
             has(name: string) {
                 return name in this.importTypes
@@ -301,78 +268,166 @@ export const Registry = {
             get(name: string): Reference | undefined {
                 let importRef = this.importTypes[name];
                 if (importRef) {
-                    return {
+                    refCache[name] ??= {
                         name: name,
                         isType: true,
                         isLocal: false,
                         isTrait: false,
                         moduleRequest: importRef.moduleRequest,
                     }
+
+                    return refCache[name];
                 }
 
                 importRef = this.importVars[name];
                 if (importRef) {
-                    return {
+                    refCache[name] ??= {
                         name: name,
                         isType: false,
                         isLocal: false,
                         isTrait: false,
                         moduleRequest: importRef.moduleRequest,
                     }
+
+                    return refCache[name];
                 }
 
                 if (name in this.traits) {
-                    return {
+                    refCache[name] ??= {
                         name: name,
                         isType: false,
                         isLocal: true,
                         isTrait: true,
                         definition: this.traits[name]!
                     }
+                    return refCache[name];
                 }
 
                 if (name in this.exportTypes) {
-                    return {
+                    refCache[name] ??= {
                         name: name,
                         isType: true,
                         isLocal: true,
                         isTrait: false,
-
                     }
+                    return refCache[name];
+
                 } else if (name in this.exportVars) {
-                    return {
+                    refCache[name] ??= {
                         name: name,
                         isType: false,
                         isLocal: true,
                         isTrait: false,
-
                     }
+                    return refCache[name];
+
                 }
 
             },
             getType(name: string): Reference | undefined {
                 const importRef = this.importTypes[name];
                 if (importRef) {
-                    return {
+                    refCache[name] ??= {
                         name: name,
                         isType: true,
                         isLocal: false,
                         isTrait: false,
                         moduleRequest: importRef.moduleRequest,
                     }
+                    return refCache[name];
                 }
 
                 if (name in this.exportTypes) {
-                    return {
+                    refCache[name] ??= {
                         name: name,
                         isType: true,
                         isLocal: true,
                         isTrait: false,
                     }
+                    return refCache[name];
+
                 }
             }
 
 
-        } as const
+        } satisfies FileRegistry
     }
 } as const;
+
+function addImpls(
+    impls: ForeignImpl[],
+    ownedImpls: OwnedImpl[],
+    parent: Node | null, node: Node
+) {
+
+    // TODO: proper error messages
+    //* not passing type params...
+
+    if (
+        parent && (parent.type === 'ExportDefaultDeclaration' || parent.type === 'ExportNamedDeclaration')
+        && node.type === 'ClassDeclaration'
+    ) {
+        const body = node.body.body;
+        for (const element of body) {
+            if (element.type === 'StaticBlock') {
+                for (const statement of element.body) {
+                    if (is.implStatement(statement) || is.implDeclaration(statement)) {
+                        addImpl(ownedImpls, statement, 'owned')
+                    }
+                }
+            }
+        }
+    } else if (
+        parent?.type === 'Program'
+        || parent?.type === 'ExportNamedDeclaration'
+        || parent?.type === 'ExportDefaultDeclaration'
+    ) {
+        addImpl(impls, node, 'foreign');
+    }
+}
+
+function addImpl(impls: ImplStatementMeta[], node: Node, type: 'foreign' | 'owned') {
+    if (is.implStatement(node)) {
+        addImplInner(
+            impls,
+            node.expression.arguments,
+            node.expression.typeArguments,
+            type
+        )
+    } else if (is.implDeclaration(node)) {
+        addImplInner(
+            impls,
+            node.declarations[0].init.arguments,
+            node.declarations[0].init.typeArguments,
+            type
+        )
+    }
+}
+
+function addImplInner(impls: ImplStatementMeta[], args: Argument[], typeArguments: TSTypeParameterInstantiation | null | undefined, type: 'foreign' | 'owned') {
+    if (args.length !== 1 || (args[0]?.type !== 'ArrowFunctionExpression' && args[0]?.type !== 'FunctionDeclaration' && args[0]?.type !== 'FunctionExpression')) {
+        return;
+    }
+
+    const implFn = args[0];
+
+    if (typeArguments && typeArguments.params.length === 2) {
+        const [traitType, classType] = typeArguments.params;
+
+        const traitName = typeName(traitType);
+        const className = typeName(classType);
+
+
+        if (traitName && className) {
+            impls.push({
+                type: type,
+                impl: implFn,
+                className: className,
+                traitName: traitName,
+            });
+            return true;
+        }
+
+    }
+
+}

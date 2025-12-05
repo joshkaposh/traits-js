@@ -111,6 +111,10 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         return this.#call_expr.arguments[0].properties;
     }
 
+    derive(deriveName: string) {
+        return this.#joined.derives[deriveName];
+    }
+
     serialize() {
         return {
             type: 'Definition',
@@ -131,7 +135,6 @@ export class TraitDefinition<Valid extends boolean = boolean> {
 
         this.#references = references;
     }
-
 
     #assertValid(propertyName: string) {
         if (!this.#valid) {
@@ -186,3 +189,7 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         this.#valid = false;
     }
 }
+
+// export class TraitImplementation<Valid extends boolean = boolean> {
+//     constructor() {}
+// }

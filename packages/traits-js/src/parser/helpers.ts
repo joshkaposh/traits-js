@@ -1,5 +1,9 @@
 import type { Node } from "oxc-parser";
-import type { FileRegistry, Reference, TraitFile } from "./file";
+import type { FileRegistry, Reference } from "./storage/registry";
+
+export function todo<T>(..._args: any[]): T {
+    return void 0 as T;
+}
 
 export const timestamp = (label: string, then: number) => `${label}: ${((performance.now() - then) / 1000)}`;
 
