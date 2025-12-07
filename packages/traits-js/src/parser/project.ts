@@ -27,9 +27,6 @@ export class Project {
     #files: TraitFile[];
     #ids: Record<string, number>;
 
-    #traitFileNameFilter: string;
-    #indexFileNameFilter: string;
-
     #dependencies: Record<string, Project>;
 
     #implementations: Record<string, {
@@ -37,13 +34,19 @@ export class Project {
         class: ImplMeta<Class>;
     }>;
 
+
+    #id: number;
+    #traitFileNameFilter: string;
+    #indexFileNameFilter: string;
+
+
     private constructor(
+        projectId: number,
         config: Required<TraitConfig>,
         resolver: ResolverFactory
     ) {
         const { cwd } = config;
-
-        console.log('Project root: ', cwd);
+        console.log('Project %d root: %s', projectId, cwd);
 
         this.#resolver = resolver;
         this.#files = [];
@@ -54,10 +57,15 @@ export class Project {
         this.#config = config;
         this.#indexFileNameFilter = config.indexFileNameFilter;
         this.#traitFileNameFilter = config.traitFileNameFilter;
+        this.#id = projectId;
+    }
+
+    get root() {
+        return this.#root;
     }
 
     static async new(projectRoot: string) {
-        return new Project(await getConfig(projectRoot), new ResolverFactory(resolverOptions()));
+        return new Project(0, await getConfig(projectRoot), new ResolverFactory(resolverOptions()));
     }
 
     async initialize() {
@@ -122,7 +130,7 @@ export class Project {
                     await getDependencies(resolver, root, json.dependencies)
                 );
 
-            this.#dependencies = Object.fromEntries(deps.map(d => [d[0], new Project(d[1].config, resolver)]));
+            this.#dependencies = Object.fromEntries(deps.map(d => [d[0], new Project(this.#id + 1, d[1].config, resolver)]));
 
             // if ('traits-js' in json.devDependencies) {
             //     const modifierPath = resolver.sync(this.#root, 'traits-js/modifier');
@@ -272,10 +280,8 @@ export class Project {
         if (resolvedRequest.path) {
             const foreign = !resolvedRequest.path.startsWith(this.#root);
 
-            console.log('RESOLVE IMPORT: ', foreign, localName);
-
-
             const resolvedName = importVar.localToImport;
+            console.log('RESOLVE IMPORT: ', foreign, localName, resolvedName);
             if (resolvedName) {
                 if (foreign) {
 
@@ -293,20 +299,25 @@ export class Project {
 
                     if (index < importVar.moduleRequest.length) {
                         const name = importVar.moduleRequest.slice(0, index);
-                        // console.log('REQ PATH: ', resolvedRequest.path);
 
                         const project = this.#findProject(name);
+                        console.log(project?.root);
+                        console.log('Finding trait %s in project %s...', resolvedName, name, project?.root);
+
                         // console.log('project files::', project ? project.#files.map(f => f.path) : 'N/A');
 
-                        if (project) {
-                            const files = project.#files;
-                            for (let i = 0; i < files.length; i++) {
-                                const trait = files[i]!.trait(resolvedName)
-                                if (trait) {
-                                    return trait;
-                                }
-                            }
-                        }
+                        // if (project) {
+                        // const files = project.#files;
+                        // for (let i = 0; i < files.length; i++) {
+                        //     const trait = files[i]!.trait(resolvedName)
+                        //     if (trait) {
+                        //         return trait;
+                        //     }
+                        // }
+                        // }
+
+                        // return project?.resolveTrait()
+                        console.log('LOOKING FOR PATH', resolvedRequest.path);
 
                         return project?.file(resolvedRequest.path)?.trait(resolvedName);
                     }

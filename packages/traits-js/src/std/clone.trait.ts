@@ -4,7 +4,7 @@ export type Instance<T> = T extends new (...args: any[]) => infer I ? I : T;
 
 export type Clone<T = unknown> = {
     [instance]: {
-        clone(): Instance<T>;
+        clone(this: Instance<T>): Instance<T>;
     }
 };
 

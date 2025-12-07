@@ -1,4 +1,4 @@
-import { instance, trait, type Trait, type Definition, type IntoTrait } from "traits-js";
+import { instance, trait, type Trait } from "traits-js";
 import { Foo as FooType } from "./foo.trait";
 
 export type Obj = { name: string };
@@ -24,8 +24,12 @@ export const arrowOuterObject = {};
 export const switchObject = {};
 
 
+const EmptyTrait = trait({
+    // [instance]: {}
+});
+
 export const Bar = trait<BarType>({
-    defaultStaticBar(obj: Trait, obj2: ReturnType<typeof trait<FooBarBaz>>, obj3: IntoTrait<BarType>) {
+    defaultStaticBar(obj: Trait, obj2: ReturnType<typeof trait<FooBarBaz>>, obj3: Trait<BarType>) {
         const v = {};
         console.log(v);
 
@@ -49,7 +53,9 @@ export const Bar = trait<BarType>({
 });
 
 export const BarLiteral = trait<{ BarLiteral(): void; BarDefaultLiteral?(): void }>({
-    BarDefaultLiteral() { }
+    BarDefaultLiteral() {
+
+    },
 });
 
 type FooBarBaz<Self extends object = object> = {

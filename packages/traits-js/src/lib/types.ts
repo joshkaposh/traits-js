@@ -2,30 +2,51 @@ import type { DefaultKeysOf, EmptyObject, ValidClass, This, OrEmptyObj, Prettify
 import { instance, type, type Modifier, type ModifierRecord } from "./modifier";
 
 
-type ConstType = string | boolean | number | bigint | symbol;
+// type ClassWithProp = (new (...args: any[]) => any) & {himom(): void}; 
+
+// class WithProp implements ClassWithProp {}
+
+
+type Literal = string | boolean | number | bigint | symbol;
+type Fn = (...args: any[]) => any;
+
 type OmitModifiers<T> = Omit<T, Modifier>;
 
-export type MethodRecord = Record<string, (...args: any[]) => any>;
+export type MethodRecord = Record<string, Fn>;
+
 export type TraitRecord = {
-    readonly [key: string]: ConstType | ((...args: any[]) => any);
-    readonly [key: Uppercase<string>]: ConstType;
-    readonly [key: symbol]: Record<PropertyKey, any>;
-} & {
+    readonly [key: string]: Literal | (Fn);
+    readonly [key: Uppercase<string>]: Literal;
+    readonly [key: symbol]: Record<PropertyKey, any> | (Fn);
     [instance]?: {
-        [key: string]: (...args: any[]) => any;
-        [key: symbol]: ((...args: any[]) => any) | ModifierRecord;
+        [key: string]: Fn;
+        [key: symbol]: (Fn) | ModifierRecord;
     };
     [type]?: unknown[];
-};
+}
+
+export type TraitType<Base, Derives> = {
+    [$trait]: { base: Base; derives: Derives };
+}
 
 /**
  * Used to convert a `TraitRecord` into a class ready to be derived 
  */
-export type Trait<Base extends TraitRecord = {}, Derives extends TraitRecord = {}> = (
+export type Trait<Base extends TraitRecord = {}, Derives extends TraitRecord = {}> = TraitType<Base, Derives> & (
     new (
         injection: IntoImpl<Base, Derives>
     ) => Normalize<GetInstance<Base & Derives>>
 ) & Normalize<OmitModifiers<Base & Derives>> & Self<Base & Derives>;
+
+
+declare const $trait: unique symbol;
+
+export type Trait2<Base extends TraitRecord = {}, Derives extends TraitRecord[] = [], D = GetTraitRecordsFromDerives<Derives>> = (
+    new (
+        injection: IntoImpl<Base, D>
+    ) => Normalize<GetInstance<Base & D>>
+) & { [$trait]: true } & Normalize<OmitModifiers<Base & D>> & Self<Base & D>;
+
 
 export type IntoTrait<T> = T extends Trait ? T : T extends TraitRecord ? Trait<T> : never;
 
@@ -61,10 +82,15 @@ type InstanceRequireds<Base, Derives> =
     } :
     {};
 
-
+type InstanceRequiredsNew<Base> =
+    Base extends { [instance]: infer I } ?
+    {
+        [instance]: GetRequireds<I> & Self<I>
+    } :
+    {};
 
 type RequiredMethodsFor<T> = {
-    readonly [P in keyof T as T[P] extends ((...args: any[]) => any) | ConstType ? P : never]:
+    readonly [P in keyof T as T[P] extends (Fn) | Literal ? P : never]:
     T[P];
 };
 
@@ -73,14 +99,14 @@ type RequiredMethodsFor<T> = {
 type DefaultMethodsFor<T, K extends keyof T = DefaultKeysOf<T>> =
     {
         readonly [P in K as (
-            T[P] extends ((...args: any[]) => any) | undefined ? P : never
+            T[P] extends (Fn) | undefined ? P : never
         )
         ]-?: T[P] & {};
     };
 
 type PartialsFor<T> = {
     readonly [P in keyof T as (
-        T[P] extends ((...args: any[]) => any) | undefined ? P : never
+        T[P] extends (Fn) | undefined ? P : never
     )
     ]: T[P];
 } & {};
@@ -91,22 +117,26 @@ type PartialMethods<Base, Derives> = Prettify<(Base extends { [instance]?: infer
     {}) & PartialsFor<Base>
 > & Self<Base & Derives>;
 
+type PartialMethodsNew<Base> = Prettify<(Base extends { [instance]?: infer I } ?
+    I extends EmptyObject ? {} :
+    { [instance]?: PartialsFor<I> & Self<I> } :
+    {}) & PartialsFor<Base>
+> & Self<Base>;
+
+
 type GetInstance<T> = T extends { [instance]?: infer I } ? I extends EmptyObject ? {} : I : {};
 
 // TODO: figure out how to exclude `{[instance]:{...}}` in cases where `I` has no default methods
 type DefaultInstanceMethods<Base, Derives> =
     Base extends { [instance]?: infer I } ?
-    (
-        I extends EmptyObject ? EmptyObject :
-        //* only include `[instance]: I` if `I` has any optional properties
-        DefaultMethodsFor<I> extends EmptyObject ? {} :
-        {
-            [instance]: DefaultMethodsFor<I> & Self<
-                I & GetInstance<Derives>
-            >
-        }
-    ) :
-    {};
+    DefaultKeysOf<I> extends never ? {} :
+    I extends Record<PropertyKey, never> ? {} :
+    {
+        [instance]: DefaultMethodsFor<I> & Self<
+            GetInstance<Base> & GetInstance<Derives>
+        >
+    } : {}
+
 
 export type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitRecord = {}> = T extends [infer Current, ...infer Rest] ? GetTraitRecordsFromDerives<Rest, Merged & (
     Current extends Trait<infer Base, infer Derives> ?
@@ -115,16 +145,47 @@ export type GetTraitRecordsFromDerives<T extends any[], Merged extends TraitReco
     never
 )> : Merged;
 
+
+export type NormalizeTraitRecordsFromDerives<T extends any[], Merged extends any[] = []> = T extends [infer Current, ...infer Rest] ? NormalizeTraitRecordsFromDerives<Rest, [...Merged, (
+    Current extends Trait2<infer Base, infer Derives> ?
+    [Base, ...Derives] :
+    Current extends TraitRecord ? Current :
+    never
+)]> : Merged;
+
 export type Definition<Base, Derives = {}> = OrEmptyObj<DefaultMethodsFor<Base> & DefaultInstanceMethods<Base, Derives>> & Self<Base & Derives>
 
 type RequiredTraitMethods<Base, Derives> = OrEmptyObj<GetRequireds<Derives & Base> & InstanceRequireds<Base, Derives> & Self<Base & Derives>>;
+type RequiredTraitMethodsNew<Base> = OrEmptyObj<GetRequireds<Base> & InstanceRequiredsNew<Base> & Self<Base>>;
+
 
 type IntoImpl<Base, Derives> = (RequiredTraitMethods<Base, Derives> & PartialMethods<Base, Derives>) & Self<Base & Derives>;
+
+type RequiredMethods<T> = (RequiredTraitMethodsNew<T> & PartialMethodsNew<T>);
+
+// type ConvertToImplObject<DeriveArray extends any[], Converted extends any[] = []> = DeriveArray extends
+
+
+// export type ConvertToImplObject<T extends any[], Merged extends any[] = []> = T extends [infer Current, ...infer Rest] ?
+//     ConvertToImplObject<Rest, [...Merged, (
+//         Current extends Trait<infer Base, infer Derives> ?
+//         Base :
+//         Current extends TraitRecord ? Current :
+//         never
+//     )]> : Merged;
+
 
 export type Implementation<T> =
     T extends Trait<infer Base, infer Derives> ? IntoImpl<Base, Derives> :
     T extends TraitRecord ? IntoImpl<T, {}> :
     'Error: if you are seeing this, you tried passing a type that was not created from `trait` to `impl`. `impl` may only receive `TraitClass`(s) and / or `TraitRecord`(s)';
+
+
+export type ImplementationNew<T> =
+    T extends TraitType<infer Base, infer Derives> ? IntoImpl<Base, Derives> :
+    T extends TraitRecord ? IntoImpl<T, {}> :
+    'Error: if you are seeing this, you tried passing a type that was not created from `trait` to `impl`. `impl` may only receive `TraitClass`(s) and / or `TraitRecord`(s)';
+
 
 // type Foo = {
 //     FOO: number;

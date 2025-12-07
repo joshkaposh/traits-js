@@ -391,8 +391,10 @@ function getDerives(
         } else if (element.type === 'TSTypeQuery' && element.exprName.type === 'Identifier') {
             lookupName = element.exprName.name;
         }
+        console.log('LOOKUP NAME:', lookupName);
 
         if (!lookupName) {
+
             break;
         }
 
@@ -405,6 +407,9 @@ function getDerives(
             break;
         }
     }
+
+    console.log('GET DERIVES: ', derives.length, queuedDerives.length);
+
 
     if (derives.length !== queuedDerives.length) {
         errors.push(TraitError.InvalidDeriveType());

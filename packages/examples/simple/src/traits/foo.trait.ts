@@ -10,20 +10,25 @@ export const Foo = trait<{
         defaultInstanceFoo?(): void;
         reqInstanceFoo(): void;
     };
-}>({
-    defaultstaticFoo() {
-        this.CONSTANT;
-        this.defaultstaticFoo();
-        this.reqStaticFoo();
-    },
+}>(
 
-    [instance]: {
-        defaultInstanceFoo() {
-            this.defaultInstanceFoo();
-            this.reqInstanceFoo();
+    {
+        defaultstaticFoo() {
+            this.CONSTANT;
+            this.defaultstaticFoo();
+            this.reqStaticFoo();
         },
-    },
-});
+
+        [instance]: {
+            defaultInstanceFoo() {
+                this.defaultInstanceFoo();
+                this.reqInstanceFoo();
+            },
+        },
+
+    }
+
+);
 
 export const Simple = trait<{
     method(): void;
@@ -31,16 +36,6 @@ export const Simple = trait<{
 }>({});
 
 export const UsesOtherPackage = trait<{}, [Clone<typeof SomeClass>]>({});
-// TODO: enable this syntax in cases where we need to pass generics to trait
-// export const UsesOtherPackage = trait<{}, [Trait<Clone<typeof SomeClass>>]>({});
-
-impl<typeof UsesOtherPackage>(() => ({
-    [instance]: {
-        clone() {
-            return new SomeClass();
-        },
-    }
-}))
 
 export class SomeClass {
     static someProp = 1;
@@ -79,6 +74,19 @@ export class SomeClass {
 
     }
 }
+export class SomeOtherClass { }
+
+impl<typeof UsesOtherPackage, typeof SomeClass>((Self) => ({
+    [instance]: {
+        clone() {
+            this.instanceMethod();
+            this.instanceProp;
+            return new SomeClass();
+        },
+    }
+}))
+
+
 
 impl<typeof Simple, typeof SomeOtherClass>(() => ({
     method() { },
@@ -89,7 +97,6 @@ impl<typeof Simple, typeof SomeOtherClass>(() => ({
 
 }))
 
-export class SomeOtherClass { }
 
 
 
@@ -106,18 +113,6 @@ export const SomeClassImplsFoo = impl<typeof Foo, typeof SomeClass>((Self) => ({
         reqInstanceFoo() { },
     }
 }));
-
-export const EmptyTrait = trait<{ r(): void; d(): void; }>(
-    {
-        // what() { },
-        // d() {
-
-        // },
-    }
-);
-
-
-
 
 /**
  * 

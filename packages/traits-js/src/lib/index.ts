@@ -3,7 +3,7 @@ import type { Definition, GetTraitRecordsFromDerives, Implementation, Trait, Tra
 
 export * from './modifier';
 
-export type * from './types';
+export type { Trait } from './types';
 
 export type { ValidClass, Prettify, EmptyObject } from './helper-types';
 
@@ -67,8 +67,8 @@ function unused<T>(..._args: any[]): T {
  *  specific implementations and optimizations to your use case.
  * 
  */
-export function trait<const Base extends TraitRecord, const DeriveTypes extends any[] = []>(impl: Definition<Base, GetTraitRecordsFromDerives<DeriveTypes>>): Trait<Base, GetTraitRecordsFromDerives<DeriveTypes>> {
-    return unused(impl);
+export function trait<const Base extends TraitRecord = {}, const DeriveTypes extends any[] = []>(definition: Definition<Base, GetTraitRecordsFromDerives<DeriveTypes>>): Trait<Base, GetTraitRecordsFromDerives<DeriveTypes>> {
+    return unused(definition);
 }
 
 /**
