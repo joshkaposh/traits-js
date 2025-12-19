@@ -1,5 +1,5 @@
 import type { Class } from "oxc-parser";
-import type { TraitDefinition } from "./trait-definition";
+import type { TraitDefinition } from "./definition";
 
 export class TraitImplementation {
     #definition: TraitDefinition;

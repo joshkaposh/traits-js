@@ -1,7 +1,7 @@
 import type { Class, Declaration, TSTupleElement } from "oxc-parser";
-import { Flags } from "./flags";
-import type { DeriveTupleType, TraitCallExpression, TraitDeclaration } from "../node";
-import type { CheckMethodResult } from "../parser";
+import { Properties } from "./properties";
+import type { DeriveTupleType, TraitCallExpression, TraitDeclaration } from "../../node";
+import type { CheckMethodResult } from "../../parser";
 
 /** metadata for properly linking import statements at comp time */
 type References = {
@@ -25,8 +25,7 @@ type TraitImpl = {
 }
 
 export class TraitDefinition<Valid extends boolean = boolean> {
-    #joined: Flags<Valid>;
-    // #base: Flags<Valid>;
+    #props: Properties<Valid>;
     #node: TraitDeclaration;
     #call_expr: TraitCallExpression;
     #uninitDerives: TSTupleElement[];
@@ -49,13 +48,12 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         start: number,
         end: number,
         valid: boolean,
-        base: Flags<Valid>
+        base: Properties<Valid>
     ) {
         const call_expr = node.declarations[0].init;
         this.#node = node;
         this.#call_expr = call_expr;
-        // this.#base = base;
-        this.#joined = base.clone();
+        this.#props = base.clone();
         this.#name = name;
         this.#path = path;
         this.#id = `${path}::${name}`
@@ -71,12 +69,12 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         };
     }
 
-    static valid(node: TraitDeclaration, name: string, path: string, flags: Flags<true>, start: number, end: number): TraitDefinition<true> {
+    static valid(node: TraitDeclaration, name: string, path: string, flags: Properties<true>, start: number, end: number): TraitDefinition<true> {
         return new TraitDefinition<true>(node, name, path, start, end, true, flags);
     }
 
     static invalid(node: Declaration, name: string, path: string, start: number, end: number): TraitDefinition<false> {
-        return new TraitDefinition<false>(node as TraitDeclaration, name, path, start, end, false, Flags.empty as Flags<false>);
+        return new TraitDefinition(node as TraitDeclaration, name, path, start, end, false, Properties.empty as Properties<false>);
     }
 
     get valid() {
@@ -99,8 +97,12 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         return this.#end;
     }
 
+    get names() {
+        return this.#props.names;
+    }
+
     get flags() {
-        return this.#joined;
+        return this.#props.flags;
     }
 
     get uninitializedDerives() {
@@ -111,20 +113,16 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         return this.#call_expr.arguments[0].properties;
     }
 
-    derive(deriveName: string) {
-        return this.#joined.derives[deriveName];
-    }
-
-    serialize() {
-        return {
-            type: 'Definition',
-            name: this.name,
-            path: this.#path,
-            valid: this.#valid,
-            flags: this.flags.serialize(),
-            references: this.#references
+    *superTraits() {
+        for (const trait of this.#props.derives) {
+            yield trait;
         }
     }
+
+    invalidate() {
+        this.#valid = false;
+    }
+
 
     initialize(references: References) {
         this.#assertValid('initialize');
@@ -136,6 +134,35 @@ export class TraitDefinition<Valid extends boolean = boolean> {
         this.#references = references;
     }
 
+    hasBaseName(name: string) {
+        return this.#props.baseNameSet.has(name)
+    }
+
+    superTrait(id: string) {
+        // TODO: optimize
+        return this.#props.derives.find(t => t.id === id);
+    }
+
+    check(name: string, flags: number, isStatic: boolean) {
+        return this.#props.has(name, flags, isStatic);
+    }
+
+    getFlags(name: string) {
+        return this.#props.getFlags(name)
+    }
+
+    serialize() {
+        return {
+            type: 'Definition',
+            name: this.name,
+            path: this.#path,
+            valid: this.#valid,
+            flags: this.#props.serialize(),
+            references: this.#references
+        }
+    }
+
+
     #assertValid(propertyName: string) {
         if (!this.#valid) {
             throw new Error(`fatal - tried accessing ${propertyName} in ${this.#name} in file ${this.#path}...\nbut ${this.#name} is invalid`)
@@ -143,7 +170,7 @@ export class TraitDefinition<Valid extends boolean = boolean> {
     }
 
     filteredNames(type: number) {
-        return this.#joined.names.filter((_, i) => Boolean(this.#joined.flags[i]! & type));
+        return this.#props.names.filter((_, i) => Boolean(this.#props.flags[i]! & type));
     }
 
     // getAmbiguities(result: CheckMethodResult) {
@@ -180,14 +207,10 @@ export class TraitDefinition<Valid extends boolean = boolean> {
     join(derives: TraitDefinition[]) {
         // this.#assertValid('join');
         if (this.#valid) {
-            this.#joined = this.#joined.join(derives);
+            this.#props = this.#props.join(derives);
         }
     }
 
-    invalidate() {
-        // console.log('invalidated ', this.name);
-        this.#valid = false;
-    }
 }
 
 // export class TraitImplementation<Valid extends boolean = boolean> {

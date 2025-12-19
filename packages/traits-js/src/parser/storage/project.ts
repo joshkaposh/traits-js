@@ -1,13 +1,13 @@
 import { dirname, normalize } from 'node:path';
 import { ResolverFactory, type NapiResolveOptions, type ResolveResult } from "oxc-resolver";
-import { checkParseResult, getConfig, parseConfig, resolve, resolverOptions } from "./resolve";
-import { TraitFile } from "./storage/trait-file";
-import { Registry, type FileRegistry } from "./storage/registry";
-import { timestamp } from "./helpers";
-import { Stack, type VisitFn } from "./stack";
-import { parseDefinition, parseDerives, parseImpl, parseTraits } from "./parser";
-import type { TraitConfig } from "../lib/config";
-import type { TraitDefinition } from './storage';
+import { checkParseResult, getConfig, parseConfig, resolve, resolverOptions } from "../resolve";
+import { TraitFile } from "./trait";
+import { Registry, type FileRegistry } from "./registry";
+import { timestamp } from "../helpers";
+import { Stack, type VisitFn } from "../stack";
+import { parseDefinition, parseDerives, parseImpl, parseTraits } from "../parser";
+import type { TraitConfig } from "../../lib/config";
+import type { TraitDefinition } from '.';
 import type { Class } from 'oxc-parser';
 
 export type ProjectOptions = Pick<Required<TraitConfig>, 'cwd' | 'indexFileNameFilter' | 'traitFileNameFilter'> & {

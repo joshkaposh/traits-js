@@ -1,4 +1,5 @@
-import { instance, trait, type Trait } from "traits-js";
+import { trait, type Trait } from "traits-js";
+import { instance } from "traits-js/modifier";
 import { Foo as FooType } from "./foo.trait";
 
 export type Obj = { name: string };
@@ -10,6 +11,8 @@ export type BarType = {
         reqInstanceBar(): void;
     }
 };
+
+// export const Foo = {};
 
 export function localFunction(obj: object) {
     console.log(obj);
@@ -60,6 +63,10 @@ export const BarLiteral = trait<{ BarLiteral(): void; BarDefaultLiteral?(): void
 
 type FooBarBaz<Self extends object = object> = {
     staticRequiredFooBarBaz(): void;
+    defFBZ?(): void;
 };
 
-export const FooBarBaz = trait<FooBarBaz, [typeof FooType, typeof Bar]>({});
+export const FooBarBaz = trait<FooBarBaz, [typeof FooType, typeof Bar]>({
+    defFBZ() {
+    },
+});

@@ -1,11 +1,9 @@
-import type { ParseFileResultResult } from "../resolve";
-import { TraitDefinition } from ".";
-import { Registry, type FileRegistry, type ForeignImpl, type ImplStatementMeta, type IndexRegistry, type OwnedImpl, type Reference } from "./registry";
+import type { ParseFileResultResult } from "../../resolve";
+import { TraitDefinition } from "./definition";
+import { Registry, type FileRegistry, type ForeignImpl, type ImplStatementMeta, type IndexRegistry, type OwnedImpl, type Reference } from "../registry";
 import * as eslintScope from 'eslint-scope';
 import { visitorKeys, type Node } from "oxc-parser";
 import { walk } from "oxc-walker";
-import type { ImplStatement } from "../node";
-import type { Project } from "../project";
 
 export class TraitFile<R extends Registry = Registry> {
 

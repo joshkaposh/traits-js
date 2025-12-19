@@ -96,8 +96,8 @@ export function trait<const Base extends TraitRecord = {}, const DeriveTypes ext
  * })); 
  * ```
  */
-export function impl<const T, const Self extends ValidClass = ValidClass>(
-    Class: (self: Self) => Implementation<T>
-): Type<Self, T> {
+export function impl<const T, const Target extends ValidClass = ValidClass>(
+    Class: (self: Target) => Implementation<T, Target>
+): Type<Target, T> {
     return unused(Class);
 }

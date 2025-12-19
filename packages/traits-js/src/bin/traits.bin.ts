@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { join } from 'node:path';
-import { Project } from '../parser/project';
+import { Project } from '../parser/storage/project';
 
 const { values, positionals: _ } = parseArgs({
     options: {

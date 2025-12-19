@@ -1,6 +1,5 @@
 import { trait, as, impl, } from "traits-js";
 import { Foo as FooType } from "./foo.trait";
-import type { Trait2 } from "../../../../traits-js/src/lib/types";
 
 export const A = trait<{ a(): void }>({});
 export const B = trait<{ b(): void }>({});

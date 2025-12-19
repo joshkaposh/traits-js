@@ -1,6 +1,6 @@
 import type { Argument, ArrowFunctionExpression, Function, Class, Declaration, ImportNameKind, Node, Program, StaticExportEntry, TSTypeParameterInstantiation } from "oxc-parser";
 import { is, typeName, type TraitAliasDeclaration, type TypeDeclaration, type VarDeclaration } from "../node";
-import type { TraitDefinition } from "./trait-definition";
+import type { TraitDefinition } from "./trait/definition";
 import { walk } from "oxc-walker";
 
 export type Import = {

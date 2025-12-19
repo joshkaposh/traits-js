@@ -1,7 +1,7 @@
 import { timestamp } from './helpers';
-import { Project } from './project';
+import { Project } from './storage/project';
 
-export type { ProjectOptions } from './project';
+export type { ProjectOptions } from './storage/project';
 
 // export async function register(filePath: string) {
 //     const project = new Project({

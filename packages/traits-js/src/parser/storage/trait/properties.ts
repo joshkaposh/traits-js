@@ -1,8 +1,8 @@
 import type { Class, Node, TSSignature } from "oxc-parser";
-import type { TraitDefinition } from "./trait-definition";
-import { TraitError } from "../errors";
-import type { DeclarationRegistry } from "./registry";
-import { typeDeclarationSignatures, type TraitAliasDeclaration } from "../node";
+import type { TraitDefinition } from "./definition";
+import { TraitError } from "../../errors";
+import type { DeclarationRegistry } from "../registry";
+import { typeDeclarationSignatures, type TraitAliasDeclaration } from "../../node";
 
 // export type SerializedFlags = `${string}:${number}`;
 
@@ -87,37 +87,16 @@ export const INSTANCE_REQUIRED = REQUIRED | INSTANCE;
 
 
 class ByName {
-    readonly staticDefault: NameSet;
-    readonly staticRequired: NameSet;
-
-    readonly instanceDefault: NameSet;
-    readonly instanceRequired: NameSet;
+    #sets: [staticDefault: NameSet, staticRequired: NameSet, instanceDefault: NameSet, instanceRequired: NameSet]
 
     constructor(staticDefault: NameSet = {}, staticRequired: NameSet = {}, instanceDefault: NameSet = {}, instanceRequired: NameSet = {}) {
-        this.staticDefault = staticDefault;
-        this.staticRequired = staticRequired;
-        this.instanceDefault = instanceDefault;
-        this.instanceRequired = instanceRequired;
+        this.#sets = [staticDefault, staticRequired, instanceDefault, instanceRequired];
+    }
+
+    add(set: 0 | 1 | 2 | 3, name: string, flags: number) {
+        this.#sets[set][name] = flags;
     }
 };
-
-// export interface Flags {
-
-//     readonly flags: readonly number[];
-//     readonly names: readonly string[];
-
-//     // readonly baseNames: ReadonlySet<string>;
-//     // readonly deriveNames: ReadonlySet<string>;
-//     // readonly byName: ByName;
-//     // readonly derivesByName: ByName;
-
-
-//     entries(): FlagsIterator;
-
-//     clone(): Flags;
-
-//     [Symbol.iterator](): FlagsIterator;
-// }
 
 const PROPERTY_INSTANCE_KEY = 'instance';
 
@@ -130,13 +109,15 @@ const CONSTANT_VALUE = {
 } as const;
 
 export type NameSet = Record<string, number>;
-export class Flags<Valid extends boolean = boolean> {
+
+export class Properties<Valid extends boolean = boolean> {
 
     #isValid!: Valid;
 
     #names: readonly string[];
     #flags: readonly number[];
-    #derives: ReadOnlyDict<TraitDefinition>;
+    #byName: ByName;
+    #derives: TraitDefinition[];
 
     #nameSet: ReadonlySet<string>;
     #baseNameSet: ReadonlySet<string>;
@@ -158,11 +139,14 @@ export class Flags<Valid extends boolean = boolean> {
     private constructor(
         names: readonly string[],
         flags: readonly number[],
-        derives: ReadOnlyDict<TraitDefinition>,
+        derives: TraitDefinition[],
+        byName: ByName
     ) {
         this.#names = names;
         this.#flags = flags;
         this.#derives = derives;
+        this.#byName = byName;
+
         const baseStatics: Record<string, number> = {};
         const baseInstances: Record<string, number> = {};
         const deriveStatics: Record<string, number[]> = {};
@@ -215,16 +199,16 @@ export class Flags<Valid extends boolean = boolean> {
         this.#flagsCache = new Map();
     }
 
-    static readonly empty = new Flags([], [], {});
+    static readonly empty = new Properties([], [], [], new ByName());
 
     static tryFromType(
         types: DeclarationRegistry<TraitAliasDeclaration>,
         code: string,
         typeArgument: Node,
-    ): Flags<true> | TraitError[] {
+    ): Properties<true> | TraitError[] {
         if (typeArgument.type === 'TSTypeLiteral') {
-            const flags = Flags.fromSignatures(typeDeclarationSignatures(typeArgument)!);
-            return flags instanceof Flags ? flags : flags.errors;
+            const flags = Properties.fromSignatures(typeDeclarationSignatures(typeArgument)!);
+            return flags instanceof Properties ? flags : flags.errors;
         } else if (typeArgument.type === 'TSTypeReference') {
             if (typeArgument.typeName.type !== 'Identifier') {
                 return [TraitError.IdentifierNeLiteral(typeArgument, code)];
@@ -236,9 +220,9 @@ export class Flags<Valid extends boolean = boolean> {
                     // so we can retrieve it and parse it directly
                     typeDeclaration?.typeAnnotation.type === 'TSTypeLiteral'
                 ) {
-                    const flags = Flags.fromSignatures(typeDeclarationSignatures(typeDeclaration)!);
+                    const flags = Properties.fromSignatures(typeDeclarationSignatures(typeDeclaration)!);
                     // console.log('parse_base (reference to literal): ', `${flags instanceof Flags ? `${flags.get(STATIC)} + ${flags.get(INSTANCE)}` : ''}`);
-                    return !(flags instanceof Flags) ? [TraitError.CannotConstructFlags()] : flags;
+                    return !(flags instanceof Properties) ? [TraitError.CannotConstructFlags()] : flags;
                 } else {
                     return [TraitError.CannotConstructFlags()];
                     // TODO: parse 
@@ -251,13 +235,13 @@ export class Flags<Valid extends boolean = boolean> {
         }
     }
 
-    static fromSignatures(signatures: TSSignature[]): Flags<true> | { errors: TraitError[]; signatures: TSSignature[] } {
+    static fromSignatures(signatures: TSSignature[]): Properties<true> | { errors: TraitError[]; signatures: TSSignature[] } {
         const names: string[] = [];
         const flags: number[] = [];
 
         const baseNames = new Set<string>();
         const byName = new ByName();
-        const { staticDefault, staticRequired, instanceDefault, instanceRequired } = byName;
+        // const { staticDefault, staticRequired, instanceDefault, instanceRequired } = byName;
 
         const errors: TraitError[] = [];
         const unknowns = [];
@@ -265,26 +249,22 @@ export class Flags<Valid extends boolean = boolean> {
         for (let i = 0; i < signatures.length; i++) {
             const signature = signatures[i]!;
 
-            if (!('key' in signature)) {
+            if (!('key' in signature) || signature.key.type !== 'Identifier') {
                 errors.push(TraitError.IdentifierNeLiteral(signature, ''));
-                continue;
-            }
-
-            if (signature.key.type !== 'Identifier') {
-                errors.push(TraitError.IdentifierNeLiteral(signature.key, ''));
                 continue;
             }
 
             const signatureName = signature.key.name;
 
             if (signature.type === 'TSMethodSignature' && signature.key.type === 'Identifier') {
-                //! STATIC
-                addFlags(names, flags, signature.optional ? staticDefault : staticRequired, signatureName, STATIC | (signature.optional ? DEFAULT : REQUIRED))
-                baseNames.add(signatureName);
-
+                //! STATIC METHOD
+                names.push(signatureName);
+                const nameSet = signature.optional ? 0 : 1;
+                const flag = (signature.optional ? DEFAULT : REQUIRED) | STATIC;
+                flags.push(flag);
+                byName.add(nameSet, signatureName, flag);
             } else if (
                 signature.type === 'TSPropertySignature'
-                && signature.key.type === 'Identifier'
                 && signature.typeAnnotation
             ) {
                 const annot = signature.typeAnnotation.typeAnnotation;
@@ -299,7 +279,12 @@ export class Flags<Valid extends boolean = boolean> {
                         if (signature.type === 'TSMethodSignature' && signature.key.type === 'Identifier') {
                             const isDefault = signature.optional,
                                 instanceName = signature.key.name;
-                            addFlags(names, flags, isDefault ? instanceDefault : instanceRequired, instanceName, INSTANCE | (isDefault ? DEFAULT : REQUIRED))
+                            const nameSet = isDefault ? 2 : 3;
+                            const flag = INSTANCE | (isDefault ? DEFAULT : REQUIRED);
+                            names.push(instanceName);
+                            flags.push(flag);
+                            byName.add(nameSet, signatureName, flag);
+                            // addFlags(names, flags, isDefault ? instanceDefault : instanceRequired, instanceName, INSTANCE | (isDefault ? DEFAULT : REQUIRED))
                             baseNames.add(instanceName);
                         } else {
                             unknowns.push(signature);
@@ -307,28 +292,29 @@ export class Flags<Valid extends boolean = boolean> {
                     }
                 } else {
                     // ! CONSTANT
-                    if (signatureName !== signatureName.toUpperCase()) {
+                    if (signatureName !== signatureName.toUpperCase() || !(annot.type in CONSTANT_VALUE)) {
                         errors.push(TraitError.ConstantNameNeUppercase(signatureName));
                         continue;
                     }
 
-                    if (!(annot.type in CONSTANT_VALUE)) {
-                        errors.push(TraitError.ConstantAnnotationInvalid(signatureName));
-                        continue;
-                    }
-
-                    baseNames.add(signatureName);
-                    addFlags(names, flags, staticRequired, signatureName, STATIC | REQUIRED | CONST);
+                    names.push(signatureName);
+                    const flag = STATIC | REQUIRED | CONST;
+                    byName.add(1, signatureName, flag);
                 }
+
             } else {
                 unknowns.push(signature);
-                continue
+                continue;
             }
+
+            baseNames.add(signatureName);
+
         }
-        return errors.length || unknowns.length ? { errors, signatures } : new Flags(
+        return errors.length || unknowns.length ? { errors, signatures } : new Properties(
             names,
             flags,
-            {}
+            [],
+            byName
         );
     }
 
@@ -365,14 +351,13 @@ export class Flags<Valid extends boolean = boolean> {
         }
     }
 
-    join<V extends boolean>(derives: TraitDefinition[]): Flags<V> {
-        const deriveNames = derives.flatMap(d => d.flags.names);
-        const names = structuredClone(this.#names).concat(deriveNames);
-        const flags = structuredClone(this.#flags).concat(derives.flatMap(d => d.flags.flags));
-        return new Flags(names, flags, derives.reduce((acc, x) => {
-            acc[x.name] = x;
-            return acc;
-        }, Object.create(null)))
+    join<V extends boolean>(derives: TraitDefinition[]): Properties<V> {
+        const names = structuredClone(this.#names).concat(derives.flatMap(d => d.names));
+        const flags = structuredClone(this.#flags).concat(derives.flatMap(d => d.flags));
+
+        return new Properties(names, flags, derives,
+            new ByName()
+        )
     }
 
     get(flags: number) {
@@ -399,6 +384,17 @@ export class Flags<Valid extends boolean = boolean> {
         }
     }
 
+
+
+    getFlagsById(id: string, name: string) {
+        const flags = this.#flags;
+        const names = this.#names;
+        const filteredFlags = { flags: flags.filter((_, i) => names[i]! === name) };
+        this.#flagsCache.set(name, filteredFlags);
+        return filteredFlags;
+    }
+
+
     has(name: string, flag: number, isStatic: boolean) {
         if (isStatic) {
             if ((this.#static[name] ?? 0) & flag) {
@@ -413,11 +409,12 @@ export class Flags<Valid extends boolean = boolean> {
         }
     }
 
-    clone(): Flags<Valid> {
-        return new Flags(
+    clone(): Properties<Valid> {
+        return new Properties(
             this.#names,
             this.#flags,
             this.#derives,
+            this.#byName
         );
     }
 
@@ -431,7 +428,7 @@ export class Flags<Valid extends boolean = boolean> {
     }
 }
 
-export type ParsedDerives = ({ implicit: true; type: Flags } | { implicit: false; type: TraitDefinition })[]
+export type ParsedDerives = ({ implicit: true; type: Properties } | { implicit: false; type: TraitDefinition })[]
 
 interface FlagsIter {
     next(): IteratorResult<[name: string, flags: number]>;
@@ -571,10 +568,4 @@ class ChainedFlagsIterator implements FlagsIter {
     [Symbol.iterator]() {
         return this;
     }
-}
-
-function addFlags(names: string[], flags: number[], byName: Record<string, number>, name: string, flag: number) {
-    names.push(name);
-    flags.push(flag);
-    byName[name] = flag;
 }

@@ -1,4 +1,5 @@
-import { instance, trait, impl, type Trait } from 'traits-js';
+import { trait, impl, type Trait } from 'traits-js';
+import { instance } from 'traits-js/modifier';
 import { Clone } from 'traits-js/traits';
 
 export const Foo = trait<{
@@ -53,13 +54,15 @@ export class SomeClass {
             ```
          */
 
-        const What = impl<typeof Simple, typeof SomeClass>(() => ({
+        const What = impl<typeof Simple, typeof SomeClass>((Self) => ({
             method() {
-
+                this
             },
             [instance]: {
-                method() {
-
+                method(param) {
+                    this.method(param);
+                    this.instanceMethod();
+                    this.instanceProp;
                 },
             }
         }));
@@ -79,19 +82,42 @@ export class SomeOtherClass { }
 impl<typeof UsesOtherPackage, typeof SomeClass>((Self) => ({
     [instance]: {
         clone() {
-            this.instanceMethod();
-            this.instanceProp;
+            const c = this.clone();
+            this
+            // this.clone();
+            // this.instanceMethod();
+            // this.instanceProp;
             return new SomeClass();
         },
     }
 }))
 
 
+impl<typeof Foo, typeof SomeClass>(() => ({
+    CONSTANT: 3,
+    defaultstaticFoo() {
+        this
+    },
+    reqStaticFoo() {
+        this
+        this.prototype.instanceMethod()
+    },
+    [instance]: {
+        reqInstanceFoo() {
+            this.defaultInstanceFoo();
+            this.reqInstanceFoo();
+            this.instanceMethod();
+            this.instanceProp;
+        },
+    }
+}));
+
 
 impl<typeof Simple, typeof SomeOtherClass>(() => ({
     method() { },
     [instance]: {
         method(param) {
+            this
         },
     }
 

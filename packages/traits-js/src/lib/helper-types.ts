@@ -1,6 +1,11 @@
 export type OrEmptyObj<T> = T extends EmptyObject ? EmptyObject : T;
 
+export type Instance<T> = T extends new (...args: any[]) => infer I ? I : T;
 export type Prettify<T> = { [K in keyof T]: T[K] } & {}
+
+export type Normalize<T> = {
+    readonly [P in keyof T]-?: T[P] & {};
+};
 
 
 /** Any object such as `{}` */
@@ -24,4 +29,9 @@ export type This<T> = ThisType<{
  */
 export type DefaultKeysOf<T, K extends keyof T = keyof T> = keyof {
     [P in K as Omit<T, P> extends T ? P : never]: T[P];
+};
+
+
+export type RequiredKeysOf<T, K extends keyof T = keyof T> = keyof {
+    [P in K as Omit<T, P> extends T ? never : P]: T[P];
 };

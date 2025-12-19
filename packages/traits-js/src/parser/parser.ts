@@ -6,10 +6,10 @@ import type { DeclarationRegistry, FileRegistry, ImplStatementMeta, Reference } 
 import { TraitError } from "./errors";
 import { is, type TraitAliasDeclaration, type TraitCallExpression, type TraitDeclaration, type TraitObjectProperty, type TypeArguments, type TypeDeclaration } from "./node";
 import { TRAIT_FN_NAME } from "./constants";
-import { DEFAULT, Flags, INSTANCE, INSTANCE_REQUIRED, REQUIRED, STATIC, STATIC_REQUIRED } from "./storage/flags";
+import { DEFAULT, Properties, INSTANCE, INSTANCE_REQUIRED, REQUIRED, STATIC, STATIC_REQUIRED } from "./storage/trait/properties";
 import { addTypeRef, createFilteredExportOrImportNames } from "./helpers";
-import type { TraitFile } from "./storage/trait-file";
-import type { Project } from "./project";
+import type { TraitFile } from "./storage/trait/file";
+import type { Project } from "./storage/project";
 
 type AmbiguousCallSite = { identName: string; start: number; end: number };
 
@@ -81,11 +81,6 @@ export function parseTraits(file: TraitFile<FileRegistry>) {
 // -> impl<Trait, Class>(() => {}) <-
 
 export function parseImpl(project: Project, file: TraitFile<FileRegistry>, impl: ImplStatementMeta) {
-    // let implObject!: ObjectExpression;
-    // let body!: Statement[] | undefined;
-
-    // const implFn = impl.impl;
-
     const trait = project.resolveTrait(file, impl.traitName);
 
     const implObject = getImplObject(impl);
@@ -98,9 +93,9 @@ export function parseImpl(project: Project, file: TraitFile<FileRegistry>, impl:
 
 
 
-        const flags = trait.flags;
-        const requiredStaticNames = flags.get(STATIC_REQUIRED);
-        const requiredInstanceNames = flags.get(INSTANCE_REQUIRED);
+        // const flags = trait.flags;
+        // const requiredStaticNames = flags.get(STATIC_REQUIRED);
+        // const requiredInstanceNames = flags.get(INSTANCE_REQUIRED);
 
         const overriddenDefaults: any[] = [];
 
@@ -109,7 +104,7 @@ export function parseImpl(project: Project, file: TraitFile<FileRegistry>, impl:
         parseTraitProperties(properties as any, (propName, isStatic) => {
             console.log('Parsing impl property: ', propName);
 
-            const propFlags = flags.getFlags(propName);
+            const propFlags = trait.getFlags(propName);
             console.log('propFlags: ', propFlags);
 
 
@@ -175,16 +170,15 @@ export function parseDefinition(file: TraitFile<FileRegistry>, definition: Trait
         return;
     }
 
-    const flags = definition.flags,
-        properties = definition.properties,
+    const properties = definition.properties,
         err_requiredStaticNames: string[] = [],
         err_requiredInstanceNames: string[] = [],
         deps = parseTraitProperties(
             properties,
             (name, isStatic) => {
-                const valid = flags.has(name, DEFAULT, isStatic);
+                const valid = definition.check(name, DEFAULT, isStatic);
                 if (!valid) {
-                    const hasRequired = !flags.has(name, REQUIRED, isStatic);
+                    const hasRequired = !definition.check(name, REQUIRED, isStatic);
                     if (hasRequired) {
                         if (isStatic) {
                             err_requiredStaticNames.push(name);
@@ -277,7 +271,7 @@ function getImplObject(impl: ImplStatementMeta) {
 }
 
 // returns the flags for a given type
-function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TypeDeclaration>): Flags<true> | TraitError[] {
+function parseType(typeArguments: TypeArguments['params'], code: string, types: DeclarationRegistry<TypeDeclaration>): Properties<true> | TraitError[] {
     if (!typeArguments.length) {
         return [TraitError.EmptyTraitTypeArguments()];
     } else if (typeArguments.length > 2) {
@@ -296,9 +290,9 @@ function parseType(typeArguments: TypeArguments['params'], code: string, types: 
             return [TraitError.InvalidTraitTypeArgument()];
         }
 
-        return Flags.tryFromType(types as any, code, typeArgument);
+        return Properties.tryFromType(types as any, code, typeArgument);
     } else {
-        return Flags.tryFromType(types as any, code, typeArguments[0]);
+        return Properties.tryFromType(types as any, code, typeArguments[0]);
     }
 
 }
@@ -455,15 +449,13 @@ function checkMethods(
             const names = Array.from(new Set(ambiguousCallSites.map(acs => acs.identName)));
             const messages = names.map(name => {
                 const names = [];
-                if (definition.flags.baseNameSet.has(name)) {
+                if (definition.hasBaseName(name)) {
                     names.push(definition.name);
                 }
 
-                const derives = definition.flags.derives;
-                for (const deriveName in derives) {
-                    const derive = derives[deriveName]!;
-                    if (derive.flags.baseNameSet.has(name)) {
-                        names.push(derive.name);
+                for (const superTrait of definition.superTraits()) {
+                    if (superTrait.hasBaseName(name)) {
+                        names.push(superTrait.name);
                     }
                 }
                 return `    ${name}    (defined in ${names.join(', ')} ) `
@@ -588,7 +580,7 @@ function checkCast(definition: TraitDefinition, node: TSType, improperCasts: str
         targetName = node.exprName.name;
     }
     if (targetName != null) {
-        const targetTrait = definition.derive(targetName);
+        const targetTrait = definition.superTrait(targetName);
 
         if (!targetTrait) {
             improperCasts.push(`CastError: trait ${definition.name} does not implement ${targetName}`)
@@ -641,7 +633,7 @@ function checkAmbiguities(definition: TraitDefinition, method: Function, ambiguo
                 )
             ) {
                 const identName = parent.property.name;
-                const f = definition.flags.getFlags(identName);
+                const f = definition.getFlags(identName);
                 if (f && f.flags.length > 1) {
                     ambiguousCallSites.push({ start: parent.start, end: parent.end, identName: identName });
                 }

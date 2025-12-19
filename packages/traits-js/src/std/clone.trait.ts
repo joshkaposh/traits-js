@@ -1,10 +1,11 @@
-import { trait, type instance } from "../lib";
+import { trait, self, type instance } from "../lib";
 
 export type Instance<T> = T extends new (...args: any[]) => infer I ? I : T;
 
-export type Clone<T = unknown> = {
+export type Clone<T = any> = {
+    [self]: Instance<T>;
     [instance]: {
-        clone(this: Instance<T>): Instance<T>;
+        clone(): Instance<T>;
     }
 };
 
