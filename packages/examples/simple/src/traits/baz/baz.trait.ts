@@ -1,6 +1,6 @@
-import { instance, trait } from 'traits-js';
+import { trait } from 'traits-js';
 import { Foo } from '../foo.trait';
-
+import { instance } from 'traits-js/modifier';
 export type FooBar = typeof FooBar;
 export const FooBar = trait<{
     FOOBAR: string;

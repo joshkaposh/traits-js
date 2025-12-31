@@ -1,6 +1,5 @@
-import { trait, impl, type Trait } from 'traits-js';
+import { trait } from 'traits-js';
 import { instance } from 'traits-js/modifier';
-import { Clone } from 'traits-js/traits';
 
 export const Foo = trait<{
     CONSTANT: number;
@@ -11,151 +10,129 @@ export const Foo = trait<{
         defaultInstanceFoo?(): void;
         reqInstanceFoo(): void;
     };
-}>(
+}>({
+    defaultstaticFoo() {
+        this.CONSTANT;
+        this.defaultstaticFoo();
+        this.reqStaticFoo();
+    },
 
-    {
-        defaultstaticFoo() {
-            this.CONSTANT;
-            this.defaultstaticFoo();
-            this.reqStaticFoo();
+    [instance]: {
+        defaultInstanceFoo() {
+            this.defaultInstanceFoo();
+            this.reqInstanceFoo();
         },
+    },
 
-        [instance]: {
-            defaultInstanceFoo() {
-                this.defaultInstanceFoo();
-                this.reqInstanceFoo();
-            },
-        },
+});
 
-    }
-
-);
+export const Bar = trait<{ bar(): void, defBar?(): void }, [typeof Foo]>({
+    defBar() {
+        this
+    },
+});
 
 export const Simple = trait<{
     method(): void;
     [instance]: { method(param: number): void }
 }>({});
 
-export const UsesOtherPackage = trait<{}, [Clone<typeof SomeClass>]>({});
+// export class SomeClass {
+//     static someProp = 1;
+//     static #privateProp = 2;
+//     instanceProp = 3;
+//     instanceMethod() { }
 
-export class SomeClass {
-    static someProp = 1;
-    static #privateProp = 2;
-    instanceProp = 3;
-    instanceMethod() { }
-
-    static {
+//     static {
 
 
-        /**
-         ** An example of an incorrect call:
-            ```
-            ** 
-            ```
-         */
+//         /**
+//          ** An example of an incorrect call:
+//             ```
+//             **
+//             ```
+//          */
 
-        const What = impl<typeof Simple, typeof SomeClass>((Self) => ({
-            method() {
-                this
-            },
-            [instance]: {
-                method(param) {
-                    this.method(param);
-                    this.instanceMethod();
-                    this.instanceProp;
-                },
-            }
-        }));
+//         const What = impl<typeof Simple, typeof SomeClass>((Self) => ({
+//             method() {
+//                 this
+//             },
+//             // [instance]: {
+//             //     method(param) {
+//             //         this.method(param);
+//             //         this.instanceMethod();
+//             //         this.instanceProp;
+//             //     },
+//             // }
+//         }));
 
-        What.method();
-        What.#privateProp;
-        What.someProp;
-        const what = new What();
-        new What().instanceProp;
-        new What().instanceMethod();
-        new What().method(0);
+//         What.method();
+//         What.#privateProp;
+//         What.someProp;
+//         const what = new What();
+//         new What().instanceProp;
+//         new What().instanceMethod();
+//         // new What().method(0);
 
-    }
-}
-export class SomeOtherClass { }
+//     }
+// }
+// export class SomeOtherClass { }
 
-impl<typeof UsesOtherPackage, typeof SomeClass>((Self) => ({
-    [instance]: {
-        clone() {
-            const c = this.clone();
-            this
-            // this.clone();
-            // this.instanceMethod();
-            // this.instanceProp;
-            return new SomeClass();
-        },
-    }
-}))
-
-
-impl<typeof Foo, typeof SomeClass>(() => ({
-    CONSTANT: 3,
-    defaultstaticFoo() {
-        this
-    },
-    reqStaticFoo() {
-        this
-        this.prototype.instanceMethod()
-    },
-    [instance]: {
-        reqInstanceFoo() {
-            this.defaultInstanceFoo();
-            this.reqInstanceFoo();
-            this.instanceMethod();
-            this.instanceProp;
-        },
-    }
-}));
+// impl<typeof UsesOtherPackage, typeof SomeClass>((Self) => ({
+//     [instance]: {
+//         clone() {
+//             const c = this.clone();
+//             this
+//             // this.clone();
+//             // this.instanceMethod();
+//             // this.instanceProp;
+//             return new SomeClass();
+//         },
+//     }
+// }))
 
 
-impl<typeof Simple, typeof SomeOtherClass>(() => ({
-    method() { },
-    [instance]: {
-        method(param) {
-            this
-        },
-    }
+// impl<typeof Foo, typeof SomeClass>(() => ({
+//     CONSTANT: 3,
+//     defaultstaticFoo() {
+//         this
+//     },
+//     reqStaticFoo() {
+//         this
+//         this.prototype.instanceMethod()
+//     },
+//     [instance]: {
+//         reqInstanceFoo() {
+//             this.defaultInstanceFoo();
+//             this.reqInstanceFoo();
+//             this.instanceMethod();
+//             this.instanceProp;
+//         },
+//     }
+// }));
 
-}))
+
+// impl<typeof Simple, typeof SomeOtherClass>(() => ({
+//     method() { },
+//     // [instance]: {
+//     //     // method(param) {
+//     //     //     this
+//     //     // },
+//     // }
+
+// }))
 
 
-
-
-//* This method of implementing traits ensures
-//* no private property accesses can occur
-export const SomeClassImplsFoo = impl<typeof Foo, typeof SomeClass>((Self) => ({
-    CONSTANT: 1,
-    reqStaticFoo() {
-        Self.someProp;
-        // @ts-expect-error
-        Self.#privateProp;
-    },
-    [instance]: {
-        reqInstanceFoo() { },
-    }
-}));
-
-/**
- * 
- * Currently, traits can only be applied to classes
- * 
- * There are multiple ways to apply traits
- * 
- * If you desire to use a private property, e.g. `#foo`,
- * you must use a static initialization block to do so
- * 
- * ```
- * class SomeClass {
- * 
- *   static {
- *     
- *   }
- * }
- * ```
- * 
- */
+// //* This method of implementing traits ensures
+// //* no private property accesses can occur
+// export const SomeClassImplsFoo = impl<typeof Foo, typeof SomeClass>((Self) => ({
+//     CONSTANT: 1,
+//     reqStaticFoo() {
+//         Self.someProp;
+//         // @ts-expect-error
+//         Self.#privateProp;
+//     },
+//     [instance]: {
+//         reqInstanceFoo() { },
+//     }
+// }));
